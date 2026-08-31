@@ -8,6 +8,7 @@ const MODEL_MAP = {
   "Gemini 3.7 Flash":      { id: "gemini-3.7-flash", rpm: 5 }
 };
 
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -24,17 +25,18 @@ export default {
 
         const apiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/' + modelConfig.id + ':generateContent?key=' + apiKey;
         
-        // Use custom prompt if provided, otherwise use default
         let finalPrompt = '';
         if (customPrompt && customPrompt.trim() !== '') {
           finalPrompt = customPrompt + '\n\nText to translate:\n' + text;
         } else {
+          // UPDATED PROMPT FOR INFORMAL PERSIAN
           finalPrompt = 'Translate the following English SRT subtitle text to Persian.\n' +
             'Strict rules:\n' +
             '1. Keep the exact SRT format (sequence numbers and timestamps).\n' +
             '2. Translate ONLY the text.\n' +
             '3. Do not be creative, do not add context, do not summarize, do not change the meaning. Translate exactly what is said.\n' +
-            '4. Do not output any markdown, explanations, or conversational text. Output ONLY the translated SRT.\n\n' +
+            '4. Do not output any markdown, explanations, or conversational text. Output ONLY the translated SRT.\n' +
+            '5. CRITICAL: Use informal, colloquial, and conversational Persian (spoken style/tehrani accent). DO NOT use formal or literary Persian. This is for a movie/series, so it must sound like natural everyday speech.\n\n' +
             'Text to translate:\n' + text;
         }
 
@@ -180,12 +182,14 @@ const HTML_CONTENT = `<!DOCTYPE html>
   const customPromptArea = document.getElementById('custom-prompt-area');
   const customPromptText = document.getElementById('customPromptText');
 
+  // UPDATED DEFAULT PROMPT FOR INFORMAL PERSIAN
   const DEFAULT_PROMPT = 'Translate the following English SRT subtitle text to Persian.\\n' +
     'Strict rules:\\n' +
     '1. Keep the exact SRT format (sequence numbers and timestamps).\\n' +
     '2. Translate ONLY the text.\\n' +
     '3. Do not be creative, do not add context, do not summarize, do not change the meaning. Translate exactly what is said.\\n' +
-    '4. Do not output any markdown, explanations, or conversational text. Output ONLY the translated SRT.';
+    '4. Do not output any markdown, explanations, or conversational text. Output ONLY the translated SRT.\\n' +
+    '5. CRITICAL: Use informal, colloquial, and conversational Persian (spoken style/tehrani accent). DO NOT use formal or literary Persian. This is for a movie/series, so it must sound like natural everyday speech.';
 
   customPromptText.value = DEFAULT_PROMPT;
   customPromptCheck.addEventListener('change', function() {
@@ -224,7 +228,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
   function sleep(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
 
-  // Dynamic Chunking Strategies
   function getChunks(blocks, strategy) {
     if (strategy === 'full') return [blocks.join('\\n\\n')];
     if (strategy === 'half') {
@@ -288,7 +291,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
         log('--- Attempting Strategy: ' + stratName + ' ---', 'info');
         
         let chunks = getChunks(blocks, strat);
-        translatedSrt = ''; // Reset for this attempt
+        translatedSrt = ''; 
         let strategyFailed = false;
 
         for (let i = 0; i < chunks.length; i++) {
@@ -323,14 +326,14 @@ const HTML_CONTENT = `<!DOCTYPE html>
           } catch (chunkErr) {
             log('Chunk failed: ' + chunkErr.message + '. Switching strategy...', 'error');
             strategyFailed = true;
-            break; // Break inner loop to try next strategy
+            break; 
           }
         }
 
         if (!strategyFailed) {
           success = true;
           log('Strategy ' + stratName + ' succeeded!', 'success');
-          break; // Break outer loop, we are done!
+          break; 
         }
       }
 
@@ -340,7 +343,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
       log('All chunks processed! Generating download file...', 'success');
 
-      // Auto Download
       const blob = new Blob([translatedSrt], { type: 'text/plain;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
