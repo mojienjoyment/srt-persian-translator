@@ -29,14 +29,18 @@ export default {
         if (customPrompt && customPrompt.trim() !== '') {
           finalPrompt = customPrompt + '\n\nText to translate:\n' + text;
         } else {
-          // UPDATED PROMPT FOR INFORMAL PERSIAN
+          // UPDATED PROMPT WITH STRICT TIMESTAMP/NUMBER RULES AND EXAMPLE
           finalPrompt = 'Translate the following English SRT subtitle text to Persian.\n' +
-            'Strict rules:\n' +
-            '1. Keep the exact SRT format (sequence numbers and timestamps).\n' +
-            '2. Translate ONLY the text.\n' +
-            '3. Do not be creative, do not add context, do not summarize, do not change the meaning. Translate exactly what is said.\n' +
-            '4. Do not output any markdown, explanations, or conversational text. Output ONLY the translated SRT.\n' +
-            '5. CRITICAL: Use informal, colloquial, and conversational Persian (spoken style/tehrani accent). DO NOT use formal or literary Persian. This is for a movie/series, so it must sound like natural everyday speech.\n\n' +
+            'STRICT FORMATTING RULES (CRITICAL):\n' +
+            '1. DO NOT change, alter, or renumber the sequence numbers (e.g., 352, 353). Keep them EXACTLY as they are.\n' +
+            '2. DO NOT change, modify, or recalculate the timestamps (e.g., 00:20:15,532 --> 00:20:17,534). Keep them EXACTLY as they are.\n' +
+            '3. Translate ONLY the text lines.\n' +
+            '4. Use informal, colloquial, and conversational Persian (spoken style/tehrani accent). DO NOT use formal or literary Persian.\n' +
+            '5. Do not output any markdown, explanations, or conversational text. Output ONLY the translated SRT.\n\n' +
+            'Example of correct output format:\n' +
+            '352\n' +
+            '00:20:15,532 --> 00:20:17,534\n' +
+            '[Translated Persian text here]\n\n' +
             'Text to translate:\n' + text;
         }
 
@@ -182,14 +186,18 @@ const HTML_CONTENT = `<!DOCTYPE html>
   const customPromptArea = document.getElementById('custom-prompt-area');
   const customPromptText = document.getElementById('customPromptText');
 
-  // UPDATED DEFAULT PROMPT FOR INFORMAL PERSIAN
+  // UPDATED DEFAULT PROMPT WITH STRICT TIMESTAMP/NUMBER RULES AND EXAMPLE
   const DEFAULT_PROMPT = 'Translate the following English SRT subtitle text to Persian.\\n' +
-    'Strict rules:\\n' +
-    '1. Keep the exact SRT format (sequence numbers and timestamps).\\n' +
-    '2. Translate ONLY the text.\\n' +
-    '3. Do not be creative, do not add context, do not summarize, do not change the meaning. Translate exactly what is said.\\n' +
-    '4. Do not output any markdown, explanations, or conversational text. Output ONLY the translated SRT.\\n' +
-    '5. CRITICAL: Use informal, colloquial, and conversational Persian (spoken style/tehrani accent). DO NOT use formal or literary Persian. This is for a movie/series, so it must sound like natural everyday speech.';
+    'STRICT FORMATTING RULES (CRITICAL):\\n' +
+    '1. DO NOT change, alter, or renumber the sequence numbers (e.g., 352, 353). Keep them EXACTLY as they are.\\n' +
+    '2. DO NOT change, modify, or recalculate the timestamps (e.g., 00:20:15,532 --> 00:20:17,534). Keep them EXACTLY as they are.\\n' +
+    '3. Translate ONLY the text lines.\\n' +
+    '4. Use informal, colloquial, and conversational Persian (spoken style/tehrani accent). DO NOT use formal or literary Persian.\\n' +
+    '5. Do not output any markdown, explanations, or conversational text. Output ONLY the translated SRT.\\n\\n' +
+    'Example of correct output format:\\n' +
+    '352\\n' +
+    '00:20:15,532 --> 00:20:17,534\\n' +
+    '[Translated Persian text here]';
 
   customPromptText.value = DEFAULT_PROMPT;
   customPromptCheck.addEventListener('change', function() {
@@ -245,6 +253,8 @@ const HTML_CONTENT = `<!DOCTYPE html>
     }
     if (strategy === '100') return splitBySize(blocks, 100);
     if (strategy === '50') return splitBySize(blocks, 50);
+    if (strategy === '20') return splitBySize(blocks, 20);
+    if (strategy === '10') return splitBySize(blocks, 10);
   }
 
   function splitBySize(blocks, size) {
@@ -271,8 +281,8 @@ const HTML_CONTENT = `<!DOCTYPE html>
     copyBtn.disabled = true;
     
     let translatedSrt = '';
-    const strategies = ['full', 'half', 'quarter', '100', '50'];
-    const strategyNames = ['Whole Text', '2 Parts', '4 Parts', '100 blocks/chunk', '50 blocks/chunk'];
+    const strategies = ['full', 'half', 'quarter', '100', '50', '20', '10'];
+    const strategyNames = ['Whole Text', '2 Parts', '4 Parts', '100 blocks/chunk', '50 blocks/chunk', '20 blocks/chunk', '10 blocks/chunk'];
 
     log('Initializing translation using ' + modelKey);
     log('Calculated delay: ' + delayMs + 'ms between requests.', 'warn');
@@ -306,6 +316,11 @@ const HTML_CONTENT = `<!DOCTYPE html>
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(bodyData)
             });
+
+            if (!res.ok) {
+              const errText = await res.text();
+              throw new Error("HTTP " + res.status + ": " + errText.substring(0, 150));
+            }
 
             const data = await res.json();
             if (data.error) throw new Error(data.error);
