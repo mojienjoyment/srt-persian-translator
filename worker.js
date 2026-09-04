@@ -157,7 +157,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
   </div>
   <div class="form-group">
     <label for="srtFile">Upload SRT File:</label>
-    <!-- FIX: Added inline onchange to guarantee the button activates -->
     <input type="file" id="srtFile" accept=".srt,.txt" onchange="document.getElementById('translateBtn').disabled = (this.files.length === 0);">
   </div>
   <button id="translateBtn" disabled>Start Translation</button>
@@ -195,7 +194,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
     "Gemini 3 Flash": 5, "Gemini 3.5 Flash": 5, "Gemini 3.6 Flash": 5, "Gemini 3.7 Flash": 5
   };
 
-  // Fallback JS event listener (the inline HTML one is the primary fix)
   srtFileInput.addEventListener('change', function() {
     translateBtn.disabled = (this.files.length === 0);
   });
@@ -233,10 +231,21 @@ const HTML_CONTENT = `<!DOCTYPE html>
     }
   }
 
+  // FIX: Completely removed backtick escaping to prevent syntax errors
   function parseAIResponse(str) {
-    str = str.replace(/^\`\`\`json\s*/i, '').replace(/^\`\`\`\s*/i, '').trim();
-    try { const parsed = JSON.parse(str); if (Array.isArray(parsed)) return parsed; } catch (e) {}
-    const regex = /\{\s*"id"\s*:\s*"[^"]*"\s*,\s*"text"\s*:\s*"(?:\\\\.|[^"\\\\])*"\s*\}/g;
+    const bt = String.fromCharCode(96);
+    const bt3 = bt + bt + bt;
+    str = str.replace(new RegExp('^' + bt3 + 'json\\\\s*', 'i'), '')
+             .replace(new RegExp('^' + bt3 + '\\\\s*', 'i'), '')
+             .replace(new RegExp(bt3 + '$', 'g'), '')
+             .trim();
+             
+    try { 
+      const parsed = JSON.parse(str); 
+      if (Array.isArray(parsed)) return parsed; 
+    } catch (e) {}
+    
+    const regex = new RegExp('\\\\{"id"\\\\s*:\\\\s*"[^"]+"\\\\s*,\\\\s*"text"\\\\s*:\\\\s*"(?:\\\\\\\\.|[^"\\\\\\\\])*"\\\\}', 'g');
     const matches = str.match(regex);
     if (matches && matches.length > 0) {
       try { return JSON.parse('[' + matches.join(',') + ']'); } catch (e) {}
@@ -245,9 +254,9 @@ const HTML_CONTENT = `<!DOCTYPE html>
   }
 
   function getChunks(blocks, strategy) {
-    if (strategy === 'full') return [blocks.join('\n\n')];
-    if (strategy === 'half') { let mid = Math.ceil(blocks.length / 2); return [blocks.slice(0, mid).join('\n\n'), blocks.slice(mid).join('\n\n')]; }
-    if (strategy === 'quarter') { let size = Math.ceil(blocks.length / 4); let res = []; for(let i=0; i<4; i++) { let chunk = blocks.slice(i*size, (i+1)*size); if(chunk.length > 0) res.push(chunk.join('\n\n')); } return res; }
+    if (strategy === 'full') return [blocks.join('\\n\\n')];
+    if (strategy === 'half') { let mid = Math.ceil(blocks.length / 2); return [blocks.slice(0, mid).join('\\n\\n'), blocks.slice(mid).join('\\n\\n')]; }
+    if (strategy === 'quarter') { let size = Math.ceil(blocks.length / 4); let res = []; for(let i=0; i<4; i++) { let chunk = blocks.slice(i*size, (i+1)*size); if(chunk.length > 0) res.push(chunk.join('\\n\\n')); } return res; }
     if (strategy === '100') return splitBySize(blocks, 100);
     if (strategy === '50') return splitBySize(blocks, 50);
     if (strategy === '20') return splitBySize(blocks, 20);
@@ -256,7 +265,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
   function splitBySize(blocks, size) {
     let res = [];
-    for(let i=0; i<blocks.length; i+=size) { res.push(blocks.slice(i, i+size).join('\n\n')); }
+    for(let i=0; i<blocks.length; i+=size) { res.push(blocks.slice(i, i+size).join('\\n\\n')); }
     return res;
   }
 
@@ -286,10 +295,10 @@ const HTML_CONTENT = `<!DOCTYPE html>
     try {
       log('Reading file: ' + file.name);
       let srtText = await file.text();
-      srtText = srtText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-      srtText = srtText.replace(/^\uFEFF/, ''); 
+      srtText = srtText.replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n');
+      srtText = srtText.replace(/^\\uFEFF/, ''); 
       
-      const blocks = srtText.trim().split(/\n\s*\n/).filter(function(b) { return b.trim() !== ''; });
+      const blocks = srtText.trim().split(/\\n\\s*\\n/).filter(function(b) { return b.trim() !== ''; });
       log('Parsed ' + blocks.length + ' subtitle blocks.', 'success');
 
       let processedCount = 0;
@@ -313,10 +322,10 @@ const HTML_CONTENT = `<!DOCTYPE html>
           let parsedBlocks = [];
 
           if (useMethod2) {
-            const rawBlocks = rawChunks[i].trim().split(/\n\s*\n/);
+            const rawBlocks = rawChunks[i].trim().split(/\\n\\s*\\n/);
             parsedBlocks = rawBlocks.map(function(b) {
-              const lines = b.trim().split('\n');
-              return { id: lines[0] || '', timestamp: lines[1] || '', text: lines.slice(2).join('\n') };
+              const lines = b.trim().split('\\n');
+              return { id: lines[0] || '', timestamp: lines[1] || '', text: lines.slice(2).join('\\n') };
             });
             payloadText = JSON.stringify(parsedBlocks.map(function(b) { return { id: b.id, text: b.text }; }));
           }
@@ -365,14 +374,14 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
               for (let j = 0; j < parsedBlocks.length; j++) {
                 const originalId = String(parsedBlocks[j].id).trim();
-                chunkSrt += parsedBlocks[j].id + '\n' + parsedBlocks[j].timestamp + '\n' + translationMap[originalId] + '\n\n';
+                chunkSrt += parsedBlocks[j].id + '\\n' + parsedBlocks[j].timestamp + '\\n' + translationMap[originalId] + '\\n\\n';
               }
             } else {
-              chunkSrt = cleanText + '\n\n';
+              chunkSrt = cleanText + '\\n\\n';
             }
 
             translatedSrt += chunkSrt;
-            processedCount += parsedBlocks.length > 0 ? parsedBlocks.length : rawChunks[i].trim().split(/\n\s*\n/).length;
+            processedCount += parsedBlocks.length > 0 ? parsedBlocks.length : rawChunks[i].trim().split(/\\n\\s*\\n/).length;
             
             outputArea.textContent = translatedSrt;
             outputArea.scrollTop = outputArea.scrollHeight;
@@ -406,7 +415,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = file.name.replace(/\.[^/.]+$/, "") + '_persian.srt';
+      a.download = file.name.replace(/\\.[^/.]+$/, "") + '_persian.srt';
       a.click();
       URL.revokeObjectURL(url);
 
