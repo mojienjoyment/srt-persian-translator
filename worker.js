@@ -8,7 +8,6 @@ const MODEL_MAP = {
   "Gemini 3.7 Flash":      { id: "gemini-3.7-flash", rpm: 5 }
 };
 
-
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -61,7 +60,7 @@ export default {
             contents: [{ parts: [{ text: finalPrompt }] }],
             generationConfig: { 
               temperature: 0.1, 
-              maxOutputTokens: 65536 // INCREASED FROM 8192 TO 65536
+              maxOutputTokens: 65536 
             }
           })
         });
@@ -158,7 +157,8 @@ const HTML_CONTENT = `<!DOCTYPE html>
   </div>
   <div class="form-group">
     <label for="srtFile">Upload SRT File:</label>
-    <input type="file" id="srtFile" accept=".srt,.txt">
+    <!-- FIX: Added inline onchange to guarantee the button activates -->
+    <input type="file" id="srtFile" accept=".srt,.txt" onchange="document.getElementById('translateBtn').disabled = (this.files.length === 0);">
   </div>
   <button id="translateBtn" disabled>Start Translation</button>
   <h3>System Logs</h3>
@@ -195,14 +195,9 @@ const HTML_CONTENT = `<!DOCTYPE html>
     "Gemini 3 Flash": 5, "Gemini 3.5 Flash": 5, "Gemini 3.6 Flash": 5, "Gemini 3.7 Flash": 5
   };
 
-  // FIX: Multiple event listeners to guarantee the button activates when a file is selected
-  function checkFileState() {
-    translateBtn.disabled = srtFileInput.files.length === 0;
-  }
-  srtFileInput.addEventListener('change', checkFileState);
-  srtFileInput.addEventListener('input', checkFileState);
-  srtFileInput.addEventListener('click', function() {
-    setTimeout(checkFileState, 500); // Fallback for browsers that delay the change event
+  // Fallback JS event listener (the inline HTML one is the primary fix)
+  srtFileInput.addEventListener('change', function() {
+    translateBtn.disabled = (this.files.length === 0);
   });
 
   copyBtn.addEventListener('click', function() {
@@ -421,8 +416,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
     } catch (err) {
       log('FATAL ERROR: ' + err.message, 'error');
     } finally {
-      // FIX: Guarantee button state and text are reset
-      translateBtn.disabled = srtFileInput.files.length === 0;
+      translateBtn.disabled = (srtFileInput.files.length === 0);
       translateBtn.textContent = 'Start Translation';
     }
   });
