@@ -32,13 +32,13 @@ export default {
             'STRICT RULES:\n' +
             '1. Return ONLY a valid JSON array of objects.\n' +
             '2. Each object MUST have the exact same "id" as the input, and the translated string in the "text" field.\n' +
-            '3. Do NOT merge, split, or skip any objects.\n' +
+            '3. Do NOT merge, split, or skip any objects. You MUST translate every single item.\n' +
             '4. Use informal, colloquial Persian (spoken style/tehrani accent). DO NOT use formal Persian.\n' +
             '5. Do NOT output any markdown, explanations, or conversational text. Just the JSON array.\n\n' +
             'Input:\n' + text;
             
           if (customPrompt && customPrompt.trim() !== '') {
-            finalPrompt = customPrompt + '\n\nCRITICAL: Return ONLY a valid JSON array of objects with the exact same "id"s and translated "text".\n\nInput:\n' + text;
+            finalPrompt = customPrompt + '\n\nCRITICAL: Return ONLY a valid JSON array of objects with the exact same "id"s and translated "text". Do not skip any.\n\nInput:\n' + text;
           }
         } else {
           if (customPrompt && customPrompt.trim() !== '') {
@@ -66,7 +66,7 @@ export default {
             contents: [{ parts: [{ text: finalPrompt }] }],
             generationConfig: { 
               temperature: 0.1,
-              maxOutputTokens: 8192 // FIX 2: Prevents AI from cutting off JSON early
+              maxOutputTokens: 8192 
             }
           })
         });
@@ -232,7 +232,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
   function sleep(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
 
-  // FIX 3: Fetch with automatic retry for network drops ("Failed to fetch")
   async function fetchWithRetry(url, options, retries = 2, delay = 2000) {
     for (let i = 0; i < retries; i++) {
       try {
@@ -245,16 +244,14 @@ const HTML_CONTENT = `<!DOCTYPE html>
     }
   }
 
-  // FIX 2: Robust JSON parser that repairs truncated AI responses
   function parseAIResponse(str) {
-    str = str.replace(/^\\\`\\\`\\\`json\\s*/i, '').replace(/^\\\`\\\`\\\`\\s*/i, '').trim();
+    str = str.replace(/^\`\`\`json\s*/i, '').replace(/^\`\`\`\s*/i, '').trim();
     try {
       const parsed = JSON.parse(str);
       if (Array.isArray(parsed)) return parsed;
     } catch (e) {}
 
-    // If direct parse fails, extract complete objects using regex
-    const regex = /\\{\\s*"id"\\s*:\\s*"[^"]*"\\s*,\\s*"text"\\s*:\\s*"(?:\\\\.|[^"\\\\])*"\\s*\\}/g;
+    const regex = /\{\s*"id"\s*:\s*"[^"]*"\s*,\s*"text"\s*:\s*"(?:\\\\.|[^"\\\\])*"\s*\}/g;
     const matches = str.match(regex);
     
     if (matches && matches.length > 0) {
@@ -266,9 +263,9 @@ const HTML_CONTENT = `<!DOCTYPE html>
   }
 
   function getChunks(blocks, strategy) {
-    if (strategy === 'full') return [blocks.join('\\n\\n')];
-    if (strategy === 'half') { let mid = Math.ceil(blocks.length / 2); return [blocks.slice(0, mid).join('\\n\\n'), blocks.slice(mid).join('\\n\\n')]; }
-    if (strategy === 'quarter') { let size = Math.ceil(blocks.length / 4); let res = []; for(let i=0; i<4; i++) { let chunk = blocks.slice(i*size, (i+1)*size); if(chunk.length > 0) res.push(chunk.join('\\n\\n')); } return res; }
+    if (strategy === 'full') return [blocks.join('\n\n')];
+    if (strategy === 'half') { let mid = Math.ceil(blocks.length / 2); return [blocks.slice(0, mid).join('\n\n'), blocks.slice(mid).join('\n\n')]; }
+    if (strategy === 'quarter') { let size = Math.ceil(blocks.length / 4); let res = []; for(let i=0; i<4; i++) { let chunk = blocks.slice(i*size, (i+1)*size); if(chunk.length > 0) res.push(chunk.join('\n\n')); } return res; }
     if (strategy === '100') return splitBySize(blocks, 100);
     if (strategy === '50') return splitBySize(blocks, 50);
     if (strategy === '20') return splitBySize(blocks, 20);
@@ -277,7 +274,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
   function splitBySize(blocks, size) {
     let res = [];
-    for(let i=0; i<blocks.length; i+=size) { res.push(blocks.slice(i, i+size).join('\\n\\n')); }
+    for(let i=0; i<blocks.length; i+=size) { res.push(blocks.slice(i, i+size).join('\n\n')); }
     return res;
   }
 
@@ -308,11 +305,10 @@ const HTML_CONTENT = `<!DOCTYPE html>
       log('Reading file: ' + file.name);
       let srtText = await file.text();
       
-      // FIX 1: Normalize line endings to prevent \\r leaking into IDs
-      srtText = srtText.replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n');
-      srtText = srtText.replace(/^\\uFEFF/, ''); 
+      srtText = srtText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      srtText = srtText.replace(/^\uFEFF/, ''); 
       
-      const blocks = srtText.trim().split(/\\n\\s*\\n/).filter(function(b) { return b.trim() !== ''; });
+      const blocks = srtText.trim().split(/\n\s*\n/).filter(function(b) { return b.trim() !== ''; });
       log('Parsed ' + blocks.length + ' subtitle blocks.', 'success');
 
       let success = false;
@@ -333,10 +329,10 @@ const HTML_CONTENT = `<!DOCTYPE html>
           let parsedBlocks = [];
 
           if (useMethod2) {
-            const rawBlocks = rawChunks[i].trim().split(/\\n\\s*\\n/);
+            const rawBlocks = rawChunks[i].trim().split(/\n\s*\n/);
             parsedBlocks = rawBlocks.map(function(b) {
-              const lines = b.trim().split('\\n');
-              return { id: lines[0] || '', timestamp: lines[1] || '', text: lines.slice(2).join('\\n') };
+              const lines = b.trim().split('\n');
+              return { id: lines[0] || '', timestamp: lines[1] || '', text: lines.slice(2).join('\n') };
             });
             payloadText = JSON.stringify(parsedBlocks.map(function(b) { return { id: b.id, text: b.text }; }));
           }
@@ -378,21 +374,26 @@ const HTML_CONTENT = `<!DOCTYPE html>
               let missingCount = 0;
               for (let j = 0; j < parsedBlocks.length; j++) {
                 const originalId = String(parsedBlocks[j].id).trim();
-                const transText = translationMap[originalId];
-                
-                if (transText === undefined) {
+                if (translationMap[originalId] === undefined) {
                   missingCount++;
-                  translatedSrt += parsedBlocks[j].id + '\\n' + parsedBlocks[j].timestamp + '\\n' + parsedBlocks[j].text + '\\n\\n';
-                } else {
-                  translatedSrt += parsedBlocks[j].id + '\\n' + parsedBlocks[j].timestamp + '\\n' + transText + '\\n\\n';
                 }
               }
 
+              // FIX: If the AI missed ANY blocks, reject this chunk and force smaller chunks
               if (missingCount > 0) {
-                log('Warning: Recovered partial JSON. ' + missingCount + ' blocks missing, kept original English.', 'warn');
+                log('Incomplete translation: ' + missingCount + ' blocks missing. Chunk too large, trying smaller chunks...', 'warn');
+                strategyFailed = true;
+                break; // Break inner loop to trigger next strategy
+              }
+
+              // If we reach here, 100% of blocks were translated. Build the SRT.
+              for (let j = 0; j < parsedBlocks.length; j++) {
+                const originalId = String(parsedBlocks[j].id).trim();
+                const transText = translationMap[originalId];
+                translatedSrt += parsedBlocks[j].id + '\n' + parsedBlocks[j].timestamp + '\n' + transText + '\n\n';
               }
             } else {
-              translatedSrt += cleanText + '\\n\\n';
+              translatedSrt += cleanText + '\n\n';
             }
 
             outputArea.textContent = translatedSrt;
@@ -415,7 +416,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
         if (!strategyFailed) {
           success = true;
-          log('Strategy ' + stratName + ' succeeded!', 'success');
+          log('Strategy ' + stratName + ' succeeded with 100% translation!', 'success');
           break; 
         }
       }
@@ -427,7 +428,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = file.name.replace(/\\.[^/.]+$/, "") + '_persian.srt';
+      a.download = file.name.replace(/\.[^/.]+$/, "") + '_persian.srt';
       a.click();
       URL.revokeObjectURL(url);
 
