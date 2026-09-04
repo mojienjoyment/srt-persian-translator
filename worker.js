@@ -8,6 +8,7 @@ const MODEL_MAP = {
   "Gemini 3.7 Flash":      { id: "gemini-3.7-flash", rpm: 5 }
 };
 
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -27,7 +28,6 @@ export default {
         let finalPrompt = '';
         
         if (useMethod2) {
-          // BULLETPROOF METHOD 2 PROMPT: Uses explicit IDs to prevent counting errors
           finalPrompt = 'You are a professional subtitle translator. Translate the "text" field of each object in the following JSON array to informal, conversational Persian.\n' +
             'STRICT RULES:\n' +
             '1. Return ONLY a valid JSON array of objects.\n' +
@@ -64,7 +64,10 @@ export default {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: finalPrompt }] }],
-            generationConfig: { temperature: 0.1 }
+            generationConfig: { 
+              temperature: 0.1,
+              maxOutputTokens: 8192 // FIX 2: Prevents AI from cutting off JSON early
+            }
           })
         });
 
@@ -123,22 +126,17 @@ const HTML_CONTENT = `<!DOCTYPE html>
   #translateBtn { width: 100%; padding: 14px; font-size: 18px; }
   .btn-small { padding: 8px 15px; font-size: 14px; background: #27ae60; }
   .btn-small:hover { background: #229954; }
-  
   .checkbox-group { display: flex; align-items: center; margin-bottom: 10px; }
   .checkbox-group input { width: auto; margin-right: 10px; }
   .checkbox-group label { margin-bottom: 0; font-weight: normal; }
-  
   #custom-prompt-area { display: none; margin-bottom: 20px; }
-  
   #progress-bar { width: 100%; height: 14px; background: #eee; border-radius: 7px; margin: 15px 0; overflow: hidden; border: 1px solid #ddd; }
   #progress-fill { height: 100%; background: linear-gradient(90deg, #2ecc71, #27ae60); width: 0%; transition: width 0.4s ease; }
-  
   #log-area { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 6px; font-family: 'Courier New', monospace; font-size: 13px; height: 160px; overflow-y: auto; white-space: pre-wrap; margin-bottom: 20px; border: 1px solid #333; }
   .log-info { color: #3498db; }
   .log-success { color: #2ecc71; font-weight: bold; }
   .log-error { color: #e74c3c; font-weight: bold; }
   .log-warn { color: #f1c40f; }
-  
   #output-area { background: #fcfcfc; border: 2px solid #3498db; border-radius: 6px; padding: 15px; font-family: 'Courier New', monospace; font-size: 14px; max-height: 350px; overflow-y: auto; white-space: pre-wrap; color: #2c3e50; min-height: 120px; line-height: 1.5; }
   .placeholder { color: #95a5a6; font-style: italic; }
 </style>
@@ -146,7 +144,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
 <body>
 <div class="container">
   <h1>SRT to Persian Translator</h1>
-  
   <div class="form-group">
     <label for="modelSelect">Select Model:</label>
     <select id="modelSelect">
@@ -158,33 +155,26 @@ const HTML_CONTENT = `<!DOCTYPE html>
       <option value="Gemini 3.7 Flash">Gemini 3.7 Flash (RPM: 5)</option>
     </select>
   </div>
-
   <div class="checkbox-group">
     <input type="checkbox" id="method2Check" checked>
     <label for="method2Check"><strong>Use Method 2</strong> (Recommended: Bulletproof ID mapping, 100% timestamp safe)</label>
   </div>
-
   <div class="checkbox-group">
     <input type="checkbox" id="customPromptCheck">
     <label for="customPromptCheck">Enable Custom Prompt (Advanced)</label>
   </div>
-
   <div id="custom-prompt-area">
     <label for="customPromptText">Edit Prompt:</label>
     <textarea id="customPromptText" rows="6"></textarea>
   </div>
-
   <div class="form-group">
     <label for="srtFile">Upload SRT File:</label>
     <input type="file" id="srtFile" accept=".srt,.txt">
   </div>
-
   <button id="translateBtn" disabled>Start Translation</button>
-  
   <h3>System Logs</h3>
   <div id="progress-bar"><div id="progress-fill"></div></div>
   <div id="log-area"><span class="placeholder">Waiting for translation to start...</span></div>
-
   <h3>
     Live Translation Output
     <button id="copyBtn" class="btn-small" disabled>Copy to Clipboard</button>
@@ -201,7 +191,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
   const logArea = document.getElementById('log-area');
   const outputArea = document.getElementById('output-area');
   const copyBtn = document.getElementById('copyBtn');
-  
   const method2Check = document.getElementById('method2Check');
   const customPromptCheck = document.getElementById('customPromptCheck');
   const customPromptArea = document.getElementById('custom-prompt-area');
@@ -209,7 +198,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
   const DEFAULT_PROMPT = 'Translate to informal, conversational Persian. Keep the exact meaning.';
   customPromptText.value = DEFAULT_PROMPT;
-  
   customPromptCheck.addEventListener('change', function() {
     customPromptArea.style.display = customPromptCheck.checked ? 'block' : 'none';
   });
@@ -219,9 +207,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
     "Gemini 3 Flash": 5, "Gemini 3.5 Flash": 5, "Gemini 3.6 Flash": 5, "Gemini 3.7 Flash": 5
   };
 
-  function checkReady() {
-    translateBtn.disabled = !(srtFileInput.files.length > 0);
-  }
+  function checkReady() { translateBtn.disabled = !(srtFileInput.files.length > 0); }
   srtFileInput.addEventListener('change', checkReady);
 
   copyBtn.addEventListener('click', function() {
@@ -246,21 +232,43 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
   function sleep(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
 
+  // FIX 3: Fetch with automatic retry for network drops ("Failed to fetch")
+  async function fetchWithRetry(url, options, retries = 2, delay = 2000) {
+    for (let i = 0; i < retries; i++) {
+      try {
+        return await fetch(url, options);
+      } catch (err) {
+        if (i === retries - 1) throw err;
+        log('Network error. Retrying in ' + (delay/1000) + 's...', 'warn');
+        await sleep(delay);
+      }
+    }
+  }
+
+  // FIX 2: Robust JSON parser that repairs truncated AI responses
+  function parseAIResponse(str) {
+    str = str.replace(/^\\\`\\\`\\\`json\\s*/i, '').replace(/^\\\`\\\`\\\`\\s*/i, '').trim();
+    try {
+      const parsed = JSON.parse(str);
+      if (Array.isArray(parsed)) return parsed;
+    } catch (e) {}
+
+    // If direct parse fails, extract complete objects using regex
+    const regex = /\\{\\s*"id"\\s*:\\s*"[^"]*"\\s*,\\s*"text"\\s*:\\s*"(?:\\\\.|[^"\\\\])*"\\s*\\}/g;
+    const matches = str.match(regex);
+    
+    if (matches && matches.length > 0) {
+      try {
+        return JSON.parse('[' + matches.join(',') + ']');
+      } catch (e) {}
+    }
+    return null;
+  }
+
   function getChunks(blocks, strategy) {
     if (strategy === 'full') return [blocks.join('\\n\\n')];
-    if (strategy === 'half') {
-      let mid = Math.ceil(blocks.length / 2);
-      return [blocks.slice(0, mid).join('\\n\\n'), blocks.slice(mid).join('\\n\\n')];
-    }
-    if (strategy === 'quarter') {
-      let size = Math.ceil(blocks.length / 4);
-      let res = [];
-      for(let i=0; i<4; i++) {
-        let chunk = blocks.slice(i*size, (i+1)*size);
-        if(chunk.length > 0) res.push(chunk.join('\\n\\n'));
-      }
-      return res;
-    }
+    if (strategy === 'half') { let mid = Math.ceil(blocks.length / 2); return [blocks.slice(0, mid).join('\\n\\n'), blocks.slice(mid).join('\\n\\n')]; }
+    if (strategy === 'quarter') { let size = Math.ceil(blocks.length / 4); let res = []; for(let i=0; i<4; i++) { let chunk = blocks.slice(i*size, (i+1)*size); if(chunk.length > 0) res.push(chunk.join('\\n\\n')); } return res; }
     if (strategy === '100') return splitBySize(blocks, 100);
     if (strategy === '50') return splitBySize(blocks, 50);
     if (strategy === '20') return splitBySize(blocks, 20);
@@ -269,9 +277,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
   function splitBySize(blocks, size) {
     let res = [];
-    for(let i=0; i<blocks.length; i+=size) {
-      res.push(blocks.slice(i, i+size).join('\\n\\n'));
-    }
+    for(let i=0; i<blocks.length; i+=size) { res.push(blocks.slice(i, i+size).join('\\n\\n')); }
     return res;
   }
 
@@ -297,13 +303,14 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
     log('Initializing translation using ' + modelKey);
     log('Method: ' + (useMethod2 ? 'Method 2 (Bulletproof ID Mapping)' : 'Method 1 (Full SRT format)'));
-    log('Calculated delay: ' + delayMs + 'ms between requests.', 'warn');
 
     try {
       log('Reading file: ' + file.name);
       let srtText = await file.text();
-      // Remove BOM (Byte Order Mark) if present
-      srtText = srtText.replace(/^\\uFEFF/, '');
+      
+      // FIX 1: Normalize line endings to prevent \\r leaking into IDs
+      srtText = srtText.replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n');
+      srtText = srtText.replace(/^\\uFEFF/, ''); 
       
       const blocks = srtText.trim().split(/\\n\\s*\\n/).filter(function(b) { return b.trim() !== ''; });
       log('Parsed ' + blocks.length + ' subtitle blocks.', 'success');
@@ -329,25 +336,16 @@ const HTML_CONTENT = `<!DOCTYPE html>
             const rawBlocks = rawChunks[i].trim().split(/\\n\\s*\\n/);
             parsedBlocks = rawBlocks.map(function(b) {
               const lines = b.trim().split('\\n');
-              return {
-                id: lines[0] || '',
-                timestamp: lines[1] || '',
-                text: lines.slice(2).join('\\n')
-              };
+              return { id: lines[0] || '', timestamp: lines[1] || '', text: lines.slice(2).join('\\n') };
             });
-            // Send as JSON array of objects with explicit IDs
             payloadText = JSON.stringify(parsedBlocks.map(function(b) { return { id: b.id, text: b.text }; }));
           }
 
-          const bodyData = { 
-            text: payloadText, 
-            modelKey: modelKey, 
-            useMethod2: useMethod2 
-          };
+          const bodyData = { text: payloadText, modelKey: modelKey, useMethod2: useMethod2 };
           if (useCustomPrompt) bodyData.customPrompt = promptToSend;
 
           try {
-            const res = await fetch('/api/translate', {
+            const res = await fetchWithRetry('/api/translate', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(bodyData)
@@ -364,18 +362,12 @@ const HTML_CONTENT = `<!DOCTYPE html>
             const cleanText = data.text;
 
             if (useMethod2) {
-              let segments;
-              try {
-                segments = JSON.parse(cleanText);
-              } catch (parseErr) {
-                throw new Error("AI did not return valid JSON. Response: " + cleanText.substring(0, 100));
+              const segments = parseAIResponse(cleanText);
+              
+              if (!segments) {
+                throw new Error("AI response could not be parsed or repaired.");
               }
 
-              if (!Array.isArray(segments)) {
-                throw new Error("AI response is not a JSON array.");
-              }
-
-              // BULLETPROOF MAPPING: Map by ID instead of array index
               const translationMap = {};
               segments.forEach(function(item) {
                 if (item && item.id !== undefined && item.text !== undefined) {
@@ -390,7 +382,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
                 
                 if (transText === undefined) {
                   missingCount++;
-                  // Fallback to original English text if AI missed it
                   translatedSrt += parsedBlocks[j].id + '\\n' + parsedBlocks[j].timestamp + '\\n' + parsedBlocks[j].text + '\\n\\n';
                 } else {
                   translatedSrt += parsedBlocks[j].id + '\\n' + parsedBlocks[j].timestamp + '\\n' + transText + '\\n\\n';
@@ -398,7 +389,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
               }
 
               if (missingCount > 0) {
-                log('Warning: AI missed translating ' + missingCount + ' blocks. Kept original English for those.', 'warn');
+                log('Warning: Recovered partial JSON. ' + missingCount + ' blocks missing, kept original English.', 'warn');
               }
             } else {
               translatedSrt += cleanText + '\\n\\n';
@@ -409,7 +400,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
             const percent = ((i + 1) / rawChunks.length) * 100;
             progressFill.style.width = percent + '%';
-            
             log('Chunk ' + (i + 1) + ' translated! (' + Math.round(percent) + '%)', 'success');
 
             if (i < rawChunks.length - 1) {
@@ -430,12 +420,9 @@ const HTML_CONTENT = `<!DOCTYPE html>
         }
       }
 
-      if (!success) {
-        throw new Error('All chunking strategies failed. The text might be too large or the API is rejecting it.');
-      }
+      if (!success) throw new Error('All chunking strategies failed.');
 
       log('All chunks processed! Generating download file...', 'success');
-
       const blob = new Blob([translatedSrt], { type: 'text/plain;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
