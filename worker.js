@@ -258,14 +258,22 @@ const HTML_CONTENT = `<!DOCTYPE html>
     return null;
   }
 
+  // FIX: Ensure blocks are converted to strings before joining to prevent [object Object]
   function getChunks(blocks, strategy) {
-    if (strategy === 'full') return [blocks.join('\\n\\n')];
-    if (strategy === 'half') { let mid = Math.ceil(blocks.length / 2); return [blocks.slice(0, mid).join('\\n\\n'), blocks.slice(mid).join('\\n\\n')]; }
-    if (strategy === 'quarter') { let size = Math.ceil(blocks.length / 4); let res = []; for(let i=0; i<4; i++) { let chunk = blocks.slice(i*size, (i+1)*size); if(chunk.length > 0) res.push(chunk.join('\\n\\n')); } return res; }
-    if (strategy === '100') return splitBySize(blocks, 100);
-    if (strategy === '50') return splitBySize(blocks, 50);
-    if (strategy === '20') return splitBySize(blocks, 20);
-    if (strategy === '10') return splitBySize(blocks, 10);
+    const stringBlocks = blocks.map(function(b) {
+      if (typeof b === 'object' && b !== null) {
+        return b.id + '\\n' + b.timestamp + '\\n' + b.text;
+      }
+      return b;
+    });
+
+    if (strategy === 'full') return [stringBlocks.join('\\n\\n')];
+    if (strategy === 'half') { let mid = Math.ceil(stringBlocks.length / 2); return [stringBlocks.slice(0, mid).join('\\n\\n'), stringBlocks.slice(mid).join('\\n\\n')]; }
+    if (strategy === 'quarter') { let size = Math.ceil(stringBlocks.length / 4); let res = []; for(let i=0; i<4; i++) { let chunk = stringBlocks.slice(i*size, (i+1)*size); if(chunk.length > 0) res.push(chunk.join('\\n\\n')); } return res; }
+    if (strategy === '100') return splitBySize(stringBlocks, 100);
+    if (strategy === '50') return splitBySize(stringBlocks, 50);
+    if (strategy === '20') return splitBySize(stringBlocks, 20);
+    if (strategy === '10') return splitBySize(stringBlocks, 10);
   }
 
   function splitBySize(blocks, size) {
@@ -422,8 +430,13 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
           if (strat === '10' && retries >= MAX_RETRIES) {
             log('Warning: ' + remainingBlocks.length + ' blocks still untranslated after all retries. Keeping original English.', 'warn');
+            // FIX: Safely handle objects in the final fallback
             for (let b of remainingBlocks) {
-              translatedSrt += b.id + '\\n' + b.timestamp + '\\n' + b.text + '\\n\\n';
+              if (typeof b === 'object' && b !== null) {
+                translatedSrt += b.id + '\\n' + b.timestamp + '\\n' + b.text + '\\n\\n';
+              } else {
+                translatedSrt += b + '\\n\\n';
+              }
             }
             processedCount += remainingBlocks.length;
             remainingBlocks = [];
