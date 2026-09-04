@@ -1,13 +1,11 @@
-// Mapping your requested model names to actual available Gemini API endpoints.
 const MODEL_MAP = {
-  "Gemini 3.1 Flash Lite": { id: "gemini-3.1-flash-lite", rpm: 15 },
-  "Gemini 3.5 Flash Lite": { id: "gemini-3.5-flash-lite", rpm: 15 },
-  "Gemini 3 Flash":        { id: "gemini-3.0-flash", rpm: 5 },
-  "Gemini 3.5 Flash":      { id: "gemini-3.5-flash", rpm: 5 },
-  "Gemini 3.6 Flash":      { id: "gemini-3.6-flash", rpm: 5 },
-  "Gemini 3.7 Flash":      { id: "gemini-3.7-flash", rpm: 5 }
+  "Gemini 3.1 Flash Lite": { id: "gemini-1.5-flash-8b", rpm: 15 },
+  "Gemini 3.5 Flash Lite": { id: "gemini-1.5-flash-8b", rpm: 15 },
+  "Gemini 3 Flash":        { id: "gemini-1.5-flash", rpm: 5 },
+  "Gemini 3.5 Flash":      { id: "gemini-2.0-flash", rpm: 5 },
+  "Gemini 3.6 Flash":      { id: "gemini-2.0-flash", rpm: 5 },
+  "Gemini 3.7 Flash":      { id: "gemini-2.0-flash", rpm: 5 }
 };
-
 
 export default {
   async fetch(request, env, ctx) {
@@ -18,7 +16,7 @@ export default {
         const apiKey = env.GEMINI_API_KEY;
         if (!apiKey) throw new Error("GEMINI_API_KEY is not set in Cloudflare Secrets.");
 
-        const { text, modelKey, customPrompt } = await request.json();
+        const { text, modelKey, customPrompt, useMethod2 } = await request.json();
         const modelConfig = MODEL_MAP[modelKey];
         
         if (!modelConfig) throw new Error("Invalid model selected.");
@@ -26,22 +24,39 @@ export default {
         const apiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/' + modelConfig.id + ':generateContent?key=' + apiKey;
         
         let finalPrompt = '';
-        if (customPrompt && customPrompt.trim() !== '') {
-          finalPrompt = customPrompt + '\n\nText to translate:\n' + text;
+        
+        if (useMethod2) {
+          // METHOD 2 PROMPT: AI only sees text and the separator
+          finalPrompt = 'Translate the following subtitle texts to informal, conversational Persian.\n' +
+            'STRICT RULES:\n' +
+            '1. Translate ONLY the text.\n' +
+            '2. You MUST output the exact same number of text segments as provided.\n' +
+            '3. You MUST separate each translated segment EXACTLY with the separator: \n###SEP###\n' +
+            '4. Do NOT add any numbers, timestamps, markdown, or conversational text.\n' +
+            '5. Output format must be: [Translated Text 1]\n###SEP###\n[Translated Text 2]\n\n' +
+            'Texts to translate:\n' + text;
+            
+          if (customPrompt && customPrompt.trim() !== '') {
+            finalPrompt = customPrompt + '\n\nCRITICAL: Separate each translated block EXACTLY with: \n###SEP###\n\nTexts:\n' + text;
+          }
         } else {
-          // UPDATED PROMPT WITH STRICT TIMESTAMP/NUMBER RULES AND EXAMPLE
-          finalPrompt = 'Translate the following English SRT subtitle text to Persian.\n' +
-            'STRICT FORMATTING RULES (CRITICAL):\n' +
-            '1. DO NOT change, alter, or renumber the sequence numbers (e.g., 352, 353). Keep them EXACTLY as they are.\n' +
-            '2. DO NOT change, modify, or recalculate the timestamps (e.g., 00:20:15,532 --> 00:20:17,534). Keep them EXACTLY as they are.\n' +
-            '3. Translate ONLY the text lines.\n' +
-            '4. Use informal, colloquial, and conversational Persian (spoken style/tehrani accent). DO NOT use formal or literary Persian.\n' +
-            '5. Do not output any markdown, explanations, or conversational text. Output ONLY the translated SRT.\n\n' +
-            'Example of correct output format:\n' +
-            '352\n' +
-            '00:20:15,532 --> 00:20:17,534\n' +
-            '[Translated Persian text here]\n\n' +
-            'Text to translate:\n' + text;
+          // METHOD 1 PROMPT: AI sees full SRT format
+          if (customPrompt && customPrompt.trim() !== '') {
+            finalPrompt = customPrompt + '\n\nText to translate:\n' + text;
+          } else {
+            finalPrompt = 'Translate the following English SRT subtitle text to Persian.\n' +
+              'STRICT FORMATTING RULES (CRITICAL):\n' +
+              '1. DO NOT change, alter, or renumber the sequence numbers. Keep them EXACTLY as they are.\n' +
+              '2. DO NOT change, modify, or recalculate the timestamps. Keep them EXACTLY as they are.\n' +
+              '3. Translate ONLY the text lines.\n' +
+              '4. Use informal, colloquial, and conversational Persian (spoken style). DO NOT use formal Persian.\n' +
+              '5. Do not output any markdown, explanations, or conversational text. Output ONLY the translated SRT.\n\n' +
+              'Example of correct output format:\n' +
+              '352\n' +
+              '00:20:15,532 --> 00:20:17,534\n' +
+              '[Translated Persian text here]\n\n' +
+              'Text to translate:\n' + text;
+          }
         }
 
         const response = await fetch(apiUrl, {
@@ -63,7 +78,8 @@ export default {
         
         if (!translatedText) throw new Error("Empty response from Gemini.");
 
-        const cleanText = translatedText.replace(/^```srt\n?|```$/g, '').trim();
+        // Clean up any markdown code blocks the AI might add
+        const cleanText = translatedText.replace(/^```[a-z]*\n?|```$/g, '').trim();
 
         return new Response(JSON.stringify({ text: cleanText }), {
           headers: { 'Content-Type': 'application/json' }
@@ -145,13 +161,18 @@ const HTML_CONTENT = `<!DOCTYPE html>
   </div>
 
   <div class="checkbox-group">
+    <input type="checkbox" id="method2Check">
+    <label for="method2Check"><strong>Use Method 2</strong> (Safest: AI only sees text, timestamps are 100% preserved)</label>
+  </div>
+
+  <div class="checkbox-group">
     <input type="checkbox" id="customPromptCheck">
     <label for="customPromptCheck">Enable Custom Prompt (Advanced)</label>
   </div>
 
   <div id="custom-prompt-area">
-    <label for="customPromptText">Edit Prompt (Text will be appended at the end):</label>
-    <textarea id="customPromptText" rows="8"></textarea>
+    <label for="customPromptText">Edit Prompt:</label>
+    <textarea id="customPromptText" rows="6"></textarea>
   </div>
 
   <div class="form-group">
@@ -170,7 +191,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
     <button id="copyBtn" class="btn-small" disabled>Copy to Clipboard</button>
   </h3>
   <div id="output-area"><span class="placeholder">Translated subtitles will appear here in real-time...</span></div>
-  <p style="font-size: 12px; color: #7f8c8d; margin-top: 5px;">* The file will also automatically download when finished. If it doesn't, use the 'Copy' button, open Notepad, paste, and save as .srt.</p>
+  <p style="font-size: 12px; color: #7f8c8d; margin-top: 5px;">* The file will automatically download when finished. Use 'Copy' as a fallback.</p>
 </div>
 
 <script>
@@ -182,24 +203,14 @@ const HTML_CONTENT = `<!DOCTYPE html>
   const outputArea = document.getElementById('output-area');
   const copyBtn = document.getElementById('copyBtn');
   
+  const method2Check = document.getElementById('method2Check');
   const customPromptCheck = document.getElementById('customPromptCheck');
   const customPromptArea = document.getElementById('custom-prompt-area');
   const customPromptText = document.getElementById('customPromptText');
 
-  // UPDATED DEFAULT PROMPT WITH STRICT TIMESTAMP/NUMBER RULES AND EXAMPLE
-  const DEFAULT_PROMPT = 'Translate the following English SRT subtitle text to Persian.\\n' +
-    'STRICT FORMATTING RULES (CRITICAL):\\n' +
-    '1. DO NOT change, alter, or renumber the sequence numbers (e.g., 352, 353). Keep them EXACTLY as they are.\\n' +
-    '2. DO NOT change, modify, or recalculate the timestamps (e.g., 00:20:15,532 --> 00:20:17,534). Keep them EXACTLY as they are.\\n' +
-    '3. Translate ONLY the text lines.\\n' +
-    '4. Use informal, colloquial, and conversational Persian (spoken style/tehrani accent). DO NOT use formal or literary Persian.\\n' +
-    '5. Do not output any markdown, explanations, or conversational text. Output ONLY the translated SRT.\\n\\n' +
-    'Example of correct output format:\\n' +
-    '352\\n' +
-    '00:20:15,532 --> 00:20:17,534\\n' +
-    '[Translated Persian text here]';
-
+  const DEFAULT_PROMPT = 'Translate to informal, conversational Persian. Keep the exact meaning.';
   customPromptText.value = DEFAULT_PROMPT;
+  
   customPromptCheck.addEventListener('change', function() {
     customPromptArea.style.display = customPromptCheck.checked ? 'block' : 'none';
   });
@@ -270,6 +281,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
     const file = srtFileInput.files[0];
     const rpm = RPM_MAP[modelKey];
     const delayMs = Math.ceil(60000 / rpm) + 500; 
+    const useMethod2 = method2Check.checked;
     const useCustomPrompt = customPromptCheck.checked;
     const promptToSend = useCustomPrompt ? customPromptText.value : null;
 
@@ -285,6 +297,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
     const strategyNames = ['Whole Text', '2 Parts', '4 Parts', '100 blocks/chunk', '50 blocks/chunk', '20 blocks/chunk', '10 blocks/chunk'];
 
     log('Initializing translation using ' + modelKey);
+    log('Method: ' + (useMethod2 ? 'Method 2 (Text-only, 100% timestamp safe)' : 'Method 1 (Full SRT format)'));
     log('Calculated delay: ' + delayMs + 'ms between requests.', 'warn');
 
     try {
@@ -300,14 +313,35 @@ const HTML_CONTENT = `<!DOCTYPE html>
         let stratName = strategyNames[s];
         log('--- Attempting Strategy: ' + stratName + ' ---', 'info');
         
-        let chunks = getChunks(blocks, strat);
+        let rawChunks = getChunks(blocks, strat);
         translatedSrt = ''; 
         let strategyFailed = false;
 
-        for (let i = 0; i < chunks.length; i++) {
-          log('Sending chunk ' + (i + 1) + ' / ' + chunks.length + '...');
+        for (let i = 0; i < rawChunks.length; i++) {
+          log('Processing chunk ' + (i + 1) + ' / ' + rawChunks.length + '...');
           
-          const bodyData = { text: chunks[i], modelKey: modelKey };
+          let payloadText = rawChunks[i];
+          let parsedBlocks = [];
+
+          // METHOD 2 LOGIC: Strip IDs and timestamps, keep only text separated by ###SEP###
+          if (useMethod2) {
+            const rawBlocks = rawChunks[i].trim().split(/\\n\\s*\\n/);
+            parsedBlocks = rawBlocks.map(function(b) {
+              const lines = b.trim().split('\\n');
+              return {
+                id: lines[0] || '',
+                timestamp: lines[1] || '',
+                text: lines.slice(2).join('\\n')
+              };
+            });
+            payloadText = parsedBlocks.map(function(b) { return b.text; }).join('\\n###SEP###\\n');
+          }
+
+          const bodyData = { 
+            text: payloadText, 
+            modelKey: modelKey, 
+            useMethod2: useMethod2 
+          };
           if (useCustomPrompt) bodyData.customPrompt = promptToSend;
 
           try {
@@ -325,16 +359,32 @@ const HTML_CONTENT = `<!DOCTYPE html>
             const data = await res.json();
             if (data.error) throw new Error(data.error);
 
-            translatedSrt += data.text + '\\n\\n';
+            const cleanText = data.text;
+
+            // METHOD 2 LOGIC: Reconstruct SRT using original IDs and timestamps
+            if (useMethod2) {
+              const segments = cleanText.split('\\n###SEP###\\n');
+              if (segments.length !== parsedBlocks.length) {
+                throw new Error("Separator mismatch. AI returned " + segments.length + " segments, expected " + parsedBlocks.length);
+              }
+              
+              for (let j = 0; j < parsedBlocks.length; j++) {
+                const transText = segments[j] ? segments[j].trim() : parsedBlocks[j].text;
+                translatedSrt += parsedBlocks[j].id + '\\n' + parsedBlocks[j].timestamp + '\\n' + transText + '\\n\\n';
+              }
+            } else {
+              translatedSrt += cleanText + '\\n\\n';
+            }
+
             outputArea.textContent = translatedSrt;
             outputArea.scrollTop = outputArea.scrollHeight;
 
-            const percent = ((i + 1) / chunks.length) * 100;
+            const percent = ((i + 1) / rawChunks.length) * 100;
             progressFill.style.width = percent + '%';
             
             log('Chunk ' + (i + 1) + ' translated! (' + Math.round(percent) + '%)', 'success');
 
-            if (i < chunks.length - 1) {
+            if (i < rawChunks.length - 1) {
               log('Pausing for ' + delayMs + 'ms...', 'warn');
               await sleep(delayMs);
             }
