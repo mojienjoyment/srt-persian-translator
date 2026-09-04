@@ -8,6 +8,7 @@ const MODEL_MAP = {
   "Gemini 3.7 Flash":      { id: "gemini-3.7-flash", rpm: 5 }
 };
 
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -58,10 +59,7 @@ export default {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: finalPrompt }] }],
-            generationConfig: { 
-              temperature: 0.1, 
-              maxOutputTokens: 65536 
-            }
+            generationConfig: { temperature: 0.1, maxOutputTokens: 65536 }
           })
         });
 
@@ -231,7 +229,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
     }
   }
 
-  // FIX: Completely removed backtick escaping to prevent syntax errors
   function parseAIResponse(str) {
     const bt = String.fromCharCode(96);
     const bt3 = bt + bt + bt;
@@ -240,16 +237,24 @@ const HTML_CONTENT = `<!DOCTYPE html>
              .replace(new RegExp(bt3 + '$', 'g'), '')
              .trim();
              
-    try { 
-      const parsed = JSON.parse(str); 
-      if (Array.isArray(parsed)) return parsed; 
-    } catch (e) {}
+    try { const parsed = JSON.parse(str); if (Array.isArray(parsed)) return parsed; } catch (e) {}
     
+    const firstBracket = str.indexOf('[');
+    const lastBracket = str.lastIndexOf(']');
+    if (firstBracket !== -1) {
+      let subStr = str.substring(firstBracket);
+      if (lastBracket === -1 || lastBracket < subStr.length - 1) subStr += ']';
+      try { const parsed = JSON.parse(subStr); if (Array.isArray(parsed)) return parsed; } catch (e) {}
+    }
+
     const regex = new RegExp('\\\\{"id"\\\\s*:\\\\s*"[^"]+"\\\\s*,\\\\s*"text"\\\\s*:\\\\s*"(?:\\\\\\\\.|[^"\\\\\\\\])*"\\\\}', 'g');
     const matches = str.match(regex);
-    if (matches && matches.length > 0) {
-      try { return JSON.parse('[' + matches.join(',') + ']'); } catch (e) {}
-    }
+    if (matches && matches.length > 0) { try { return JSON.parse('[' + matches.join(',') + ']'); } catch (e) {} }
+    
+    const regex2 = new RegExp('\\\\{"text"\\\\s*:\\\\s*"(?:\\\\\\\\.|[^"\\\\\\\\])*"\\\\s*,\\\\s*"id"\\\\s*:\\\\s*"[^"]+"\\\\}', 'g');
+    const matches2 = str.match(regex2);
+    if (matches2 && matches2.length > 0) { try { return JSON.parse('[' + matches2.join(',') + ']'); } catch (e) {} }
+
     return null;
   }
 
@@ -286,6 +291,10 @@ const HTML_CONTENT = `<!DOCTYPE html>
     copyBtn.disabled = true;
     
     let translatedSrt = '';
+    let processedCount = 0;
+    let remainingBlocks = [];
+    const MAX_RETRIES = 3;
+
     const strategies = ['full', 'half', 'quarter', '100', '50', '20', '10'];
     const strategyNames = ['Whole Text', '2 Parts', '4 Parts', '100 blocks/chunk', '50 blocks/chunk', '20 blocks/chunk', '10 blocks/chunk'];
 
@@ -301,108 +310,128 @@ const HTML_CONTENT = `<!DOCTYPE html>
       const blocks = srtText.trim().split(/\\n\\s*\\n/).filter(function(b) { return b.trim() !== ''; });
       log('Parsed ' + blocks.length + ' subtitle blocks.', 'success');
 
-      let processedCount = 0;
+      remainingBlocks = blocks;
 
       for (let s = 0; s < strategies.length; s++) {
-        if (processedCount >= blocks.length) break;
+        if (remainingBlocks.length === 0) break;
 
         let strat = strategies[s];
         let stratName = strategyNames[s];
-        let remainingBlocks = blocks.slice(processedCount);
-        
-        log('--- Strategy: ' + stratName + ' (Processing remaining ' + remainingBlocks.length + ' blocks) ---', 'info');
-        
-        let rawChunks = getChunks(remainingBlocks, strat);
-        let strategyFailed = false;
+        let retries = 0;
 
-        for (let i = 0; i < rawChunks.length; i++) {
-          log('Processing chunk ' + (i + 1) + ' / ' + rawChunks.length + '...');
-          
-          let payloadText = rawChunks[i];
-          let parsedBlocks = [];
+        log('--- Strategy: ' + stratName + ' (Processing ' + remainingBlocks.length + ' blocks) ---', 'info');
 
-          if (useMethod2) {
-            const rawBlocks = rawChunks[i].trim().split(/\\n\\s*\\n/);
-            parsedBlocks = rawBlocks.map(function(b) {
-              const lines = b.trim().split('\\n');
-              return { id: lines[0] || '', timestamp: lines[1] || '', text: lines.slice(2).join('\\n') };
-            });
-            payloadText = JSON.stringify(parsedBlocks.map(function(b) { return { id: b.id, text: b.text }; }));
+        while (remainingBlocks.length > 0 && retries < MAX_RETRIES) {
+          if (retries > 0) {
+            log('Retrying ' + stratName + ' for ' + remainingBlocks.length + ' missing blocks (Attempt ' + (retries + 1) + '/3)...', 'warn');
           }
 
-          const bodyData = { text: payloadText, modelKey: modelKey, useMethod2: useMethod2 };
-          if (useCustomPrompt) bodyData.customPrompt = promptToSend;
+          let rawChunks = getChunks(remainingBlocks, strat);
+          let nextRemainingBlocks = [];
+          let chunkSrtAccumulator = '';
+          let translatedInThisPass = 0;
 
-          try {
-            const res = await fetchWithRetry('/api/translate', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(bodyData)
-            });
-
-            if (!res.ok) throw new Error("HTTP " + res.status);
-            const data = await res.json();
-            if (data.error) throw new Error(data.error);
-
-            const cleanText = data.text;
-            let chunkSrt = '';
+          for (let i = 0; i < rawChunks.length; i++) {
+            log('Processing chunk ' + (i + 1) + ' / ' + rawChunks.length + '...');
+            
+            let payloadText = rawChunks[i];
+            let parsedBlocks = [];
 
             if (useMethod2) {
-              const segments = parseAIResponse(cleanText);
-              if (!segments) throw new Error("Invalid JSON response.");
-
-              const translationMap = {};
-              segments.forEach(function(item) {
-                if (item && item.id !== undefined && item.text !== undefined) {
-                  translationMap[String(item.id).trim()] = String(item.text).trim();
-                }
+              const rawBlocks = rawChunks[i].trim().split(/\\n\\s*\\n/);
+              parsedBlocks = rawBlocks.map(function(b) {
+                const lines = b.trim().split('\\n');
+                return { id: lines[0] || '', timestamp: lines[1] || '', text: lines.slice(2).join('\\n') };
               });
-
-              let missingCount = 0;
-              for (let j = 0; j < parsedBlocks.length; j++) {
-                const originalId = String(parsedBlocks[j].id).trim();
-                if (translationMap[originalId] === undefined) {
-                  missingCount++;
-                }
-              }
-
-              if (missingCount > 0) {
-                log('Incomplete: ' + missingCount + ' blocks missing. Keeping previous ' + processedCount + ' blocks. Switching strategy...', 'warn');
-                strategyFailed = true;
-                break; 
-              }
-
-              for (let j = 0; j < parsedBlocks.length; j++) {
-                const originalId = String(parsedBlocks[j].id).trim();
-                chunkSrt += parsedBlocks[j].id + '\\n' + parsedBlocks[j].timestamp + '\\n' + translationMap[originalId] + '\\n\\n';
-              }
-            } else {
-              chunkSrt = cleanText + '\\n\\n';
+              payloadText = JSON.stringify(parsedBlocks.map(function(b) { return { id: b.id, text: b.text }; }));
             }
 
-            translatedSrt += chunkSrt;
-            processedCount += parsedBlocks.length > 0 ? parsedBlocks.length : rawChunks[i].trim().split(/\\n\\s*\\n/).length;
-            
-            outputArea.textContent = translatedSrt;
-            outputArea.scrollTop = outputArea.scrollHeight;
+            const bodyData = { text: payloadText, modelKey: modelKey, useMethod2: useMethod2 };
+            if (useCustomPrompt) bodyData.customPrompt = promptToSend;
 
-            const overallPercent = (processedCount / blocks.length) * 100;
-            progressFill.style.width = overallPercent + '%';
-            log('Chunk ' + (i + 1) + ' done! Overall progress: ' + Math.round(overallPercent) + '%', 'success');
+            try {
+              const res = await fetchWithRetry('/api/translate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(bodyData)
+              });
+
+              if (!res.ok) throw new Error("HTTP " + res.status);
+              const data = await res.json();
+              if (data.error) throw new Error(data.error);
+
+              const cleanText = data.text;
+
+              if (useMethod2) {
+                const segments = parseAIResponse(cleanText);
+                if (!segments) throw new Error("Invalid JSON response.");
+
+                const translationMap = {};
+                segments.forEach(function(item) {
+                  if (item && item.id !== undefined && item.text !== undefined) {
+                    translationMap[String(item.id).trim()] = String(item.text).trim();
+                  }
+                });
+
+                let chunkMissing = [];
+                for (let j = 0; j < parsedBlocks.length; j++) {
+                  const originalId = String(parsedBlocks[j].id).trim();
+                  if (translationMap[originalId] === undefined) {
+                    chunkMissing.push(parsedBlocks[j]);
+                  } else {
+                    chunkSrtAccumulator += parsedBlocks[j].id + '\\n' + parsedBlocks[j].timestamp + '\\n' + translationMap[originalId] + '\\n\\n';
+                  }
+                }
+                nextRemainingBlocks = nextRemainingBlocks.concat(chunkMissing);
+                translatedInThisPass += (parsedBlocks.length - chunkMissing.length);
+              } else {
+                chunkSrtAccumulator += cleanText + '\\n\\n';
+                translatedInThisPass += rawChunks[i].trim().split(/\\n\\s*\\n/).length;
+              }
+
+            } catch (chunkErr) {
+              log('Chunk failed: ' + chunkErr.message + '. Retrying these blocks later...', 'error');
+              if (useMethod2) {
+                nextRemainingBlocks = nextRemainingBlocks.concat(parsedBlocks);
+              }
+            }
 
             if (i < rawChunks.length - 1) {
               log('Pausing for ' + delayMs + 'ms...', 'warn');
               await sleep(delayMs);
             }
-          } catch (chunkErr) {
-            log('Chunk failed: ' + chunkErr.message + '. Keeping ' + processedCount + ' blocks. Switching strategy...', 'error');
-            strategyFailed = true;
-            break; 
           }
-        }
 
-        if (!strategyFailed) {
-          log('Strategy ' + stratName + ' completed successfully!', 'success');
+          translatedSrt += chunkSrtAccumulator;
+          processedCount += translatedInThisPass;
+          
+          outputArea.textContent = translatedSrt;
+          outputArea.scrollTop = outputArea.scrollHeight;
+          const overallPercent = (processedCount / blocks.length) * 100;
+          progressFill.style.width = overallPercent + '%';
+          log('Pass done! Translated ' + translatedInThisPass + ' blocks. Overall progress: ' + Math.round(overallPercent) + '%', 'success');
+
+          remainingBlocks = nextRemainingBlocks;
+
+          if (remainingBlocks.length === 0) {
+            log('Strategy ' + stratName + ' completed successfully!', 'success');
+            break;
+          }
+
+          retries++;
+
+          if (strat === '10' && retries >= MAX_RETRIES) {
+            log('Warning: ' + remainingBlocks.length + ' blocks still untranslated after all retries. Keeping original English.', 'warn');
+            for (let b of remainingBlocks) {
+              translatedSrt += b.id + '\\n' + b.timestamp + '\\n' + b.text + '\\n\\n';
+            }
+            processedCount += remainingBlocks.length;
+            remainingBlocks = [];
+            outputArea.textContent = translatedSrt;
+            progressFill.style.width = '100%';
+          } else if (retries >= MAX_RETRIES) {
+            log('Max retries (3) reached for ' + stratName + '. Switching to next strategy for remaining ' + remainingBlocks.length + ' blocks.', 'warn');
+          }
         }
       }
 
