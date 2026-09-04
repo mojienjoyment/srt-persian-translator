@@ -7,6 +7,14 @@ const MODEL_MAP = {
   "Gemini 3.6 Flash":      { id: "gemini-3.6-flash", rpm: 5 },
   "Gemini 3.7 Flash":      { id: "gemini-3.7-flash", rpm: 5 }
 };
+const MODEL_MAP = {
+  "Gemini 3.1 Flash Lite": { id: "gemini-1.5-flash-8b", rpm: 15 },
+  "Gemini 3.5 Flash Lite": { id: "gemini-1.5-flash-8b", rpm: 15 },
+  "Gemini 3 Flash":        { id: "gemini-1.5-flash", rpm: 5 },
+  "Gemini 3.5 Flash":      { id: "gemini-2.0-flash", rpm: 5 },
+  "Gemini 3.6 Flash":      { id: "gemini-2.0-flash", rpm: 5 },
+  "Gemini 3.7 Flash":      { id: "gemini-2.0-flash", rpm: 5 }
+};
 
 export default {
   async fetch(request, env, ctx) {
@@ -27,21 +35,20 @@ export default {
         let finalPrompt = '';
         
         if (useMethod2) {
-          // METHOD 2 PROMPT: JSON Array approach (Much more reliable than text separators)
-          finalPrompt = 'You are a professional subtitle translator. Translate the following JSON array of English subtitle texts to informal, conversational Persian.\n' +
+          // BULLETPROOF METHOD 2 PROMPT: Uses explicit IDs to prevent counting errors
+          finalPrompt = 'You are a professional subtitle translator. Translate the "text" field of each object in the following JSON array to informal, conversational Persian.\n' +
             'STRICT RULES:\n' +
-            '1. Return ONLY a valid JSON array of strings.\n' +
-            '2. The output array MUST have the EXACT same number of elements as the input array.\n' +
-            '3. Translate each string individually. Keep internal newlines (\\n) intact if they exist in the original text.\n' +
+            '1. Return ONLY a valid JSON array of objects.\n' +
+            '2. Each object MUST have the exact same "id" as the input, and the translated string in the "text" field.\n' +
+            '3. Do NOT merge, split, or skip any objects.\n' +
             '4. Use informal, colloquial Persian (spoken style/tehrani accent). DO NOT use formal Persian.\n' +
             '5. Do NOT output any markdown, explanations, or conversational text. Just the JSON array.\n\n' +
             'Input:\n' + text;
             
           if (customPrompt && customPrompt.trim() !== '') {
-            finalPrompt = customPrompt + '\n\nCRITICAL: Return ONLY a valid JSON array of strings with the EXACT same number of elements as the input.\n\nInput:\n' + text;
+            finalPrompt = customPrompt + '\n\nCRITICAL: Return ONLY a valid JSON array of objects with the exact same "id"s and translated "text".\n\nInput:\n' + text;
           }
         } else {
-          // METHOD 1 PROMPT: AI sees full SRT format
           if (customPrompt && customPrompt.trim() !== '') {
             finalPrompt = customPrompt + '\n\nText to translate:\n' + text;
           } else {
@@ -79,7 +86,6 @@ export default {
         
         if (!translatedText) throw new Error("Empty response from Gemini.");
 
-        // Clean up any markdown code blocks the AI might add (e.g., ```json ... ```)
         let cleanText = translatedText.replace(/^```json\n?|```$/g, '').replace(/^```\n?|```$/g, '').trim();
 
         return new Response(JSON.stringify({ text: cleanText }), {
@@ -163,7 +169,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
   <div class="checkbox-group">
     <input type="checkbox" id="method2Check" checked>
-    <label for="method2Check"><strong>Use Method 2</strong> (Recommended: JSON array ensures 100% timestamp/ID safety)</label>
+    <label for="method2Check"><strong>Use Method 2</strong> (Recommended: Bulletproof ID mapping, 100% timestamp safe)</label>
   </div>
 
   <div class="checkbox-group">
@@ -298,12 +304,15 @@ const HTML_CONTENT = `<!DOCTYPE html>
     const strategyNames = ['Whole Text', '2 Parts', '4 Parts', '100 blocks/chunk', '50 blocks/chunk', '20 blocks/chunk', '10 blocks/chunk'];
 
     log('Initializing translation using ' + modelKey);
-    log('Method: ' + (useMethod2 ? 'Method 2 (JSON Array - 100% timestamp safe)' : 'Method 1 (Full SRT format)'));
+    log('Method: ' + (useMethod2 ? 'Method 2 (Bulletproof ID Mapping)' : 'Method 1 (Full SRT format)'));
     log('Calculated delay: ' + delayMs + 'ms between requests.', 'warn');
 
     try {
       log('Reading file: ' + file.name);
-      const srtText = await file.text();
+      let srtText = await file.text();
+      // Remove BOM (Byte Order Mark) if present
+      srtText = srtText.replace(/^\\uFEFF/, '');
+      
       const blocks = srtText.trim().split(/\\n\\s*\\n/).filter(function(b) { return b.trim() !== ''; });
       log('Parsed ' + blocks.length + ' subtitle blocks.', 'success');
 
@@ -324,7 +333,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
           let payloadText = rawChunks[i];
           let parsedBlocks = [];
 
-          // METHOD 2 LOGIC: Extract text into a JSON array
           if (useMethod2) {
             const rawBlocks = rawChunks[i].trim().split(/\\n\\s*\\n/);
             parsedBlocks = rawBlocks.map(function(b) {
@@ -335,8 +343,8 @@ const HTML_CONTENT = `<!DOCTYPE html>
                 text: lines.slice(2).join('\\n')
               };
             });
-            // Send as JSON array string
-            payloadText = JSON.stringify(parsedBlocks.map(function(b) { return b.text; }));
+            // Send as JSON array of objects with explicit IDs
+            payloadText = JSON.stringify(parsedBlocks.map(function(b) { return { id: b.id, text: b.text }; }));
           }
 
           const bodyData = { 
@@ -363,7 +371,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
             const cleanText = data.text;
 
-            // METHOD 2 LOGIC: Parse JSON array and reconstruct SRT
             if (useMethod2) {
               let segments;
               try {
@@ -376,13 +383,30 @@ const HTML_CONTENT = `<!DOCTYPE html>
                 throw new Error("AI response is not a JSON array.");
               }
 
-              if (segments.length !== parsedBlocks.length) {
-                throw new Error("Array length mismatch. AI returned " + segments.length + " items, expected " + parsedBlocks.length);
-              }
-              
+              // BULLETPROOF MAPPING: Map by ID instead of array index
+              const translationMap = {};
+              segments.forEach(function(item) {
+                if (item && item.id !== undefined && item.text !== undefined) {
+                  translationMap[String(item.id).trim()] = String(item.text).trim();
+                }
+              });
+
+              let missingCount = 0;
               for (let j = 0; j < parsedBlocks.length; j++) {
-                const transText = segments[j] ? String(segments[j]).trim() : parsedBlocks[j].text;
-                translatedSrt += parsedBlocks[j].id + '\\n' + parsedBlocks[j].timestamp + '\\n' + transText + '\\n\\n';
+                const originalId = String(parsedBlocks[j].id).trim();
+                const transText = translationMap[originalId];
+                
+                if (transText === undefined) {
+                  missingCount++;
+                  // Fallback to original English text if AI missed it
+                  translatedSrt += parsedBlocks[j].id + '\\n' + parsedBlocks[j].timestamp + '\\n' + parsedBlocks[j].text + '\\n\\n';
+                } else {
+                  translatedSrt += parsedBlocks[j].id + '\\n' + parsedBlocks[j].timestamp + '\\n' + transText + '\\n\\n';
+                }
+              }
+
+              if (missingCount > 0) {
+                log('Warning: AI missed translating ' + missingCount + ' blocks. Kept original English for those.', 'warn');
               }
             } else {
               translatedSrt += cleanText + '\\n\\n';
