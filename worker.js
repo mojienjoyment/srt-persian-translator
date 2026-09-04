@@ -59,7 +59,10 @@ export default {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: finalPrompt }] }],
-            generationConfig: { temperature: 0.1, maxOutputTokens: 8192 }
+            generationConfig: { 
+              temperature: 0.1, 
+              maxOutputTokens: 65536 // INCREASED FROM 8192 TO 65536
+            }
           })
         });
 
@@ -192,11 +195,15 @@ const HTML_CONTENT = `<!DOCTYPE html>
     "Gemini 3 Flash": 5, "Gemini 3.5 Flash": 5, "Gemini 3.6 Flash": 5, "Gemini 3.7 Flash": 5
   };
 
-  // FIX: Simplified and robust button state management
-  function updateButtonState() {
+  // FIX: Multiple event listeners to guarantee the button activates when a file is selected
+  function checkFileState() {
     translateBtn.disabled = srtFileInput.files.length === 0;
   }
-  srtFileInput.addEventListener('change', updateButtonState);
+  srtFileInput.addEventListener('change', checkFileState);
+  srtFileInput.addEventListener('input', checkFileState);
+  srtFileInput.addEventListener('click', function() {
+    setTimeout(checkFileState, 500); // Fallback for browsers that delay the change event
+  });
 
   copyBtn.addEventListener('click', function() {
     if (outputArea.textContent && !outputArea.querySelector('.placeholder')) {
@@ -290,10 +297,10 @@ const HTML_CONTENT = `<!DOCTYPE html>
       const blocks = srtText.trim().split(/\n\s*\n/).filter(function(b) { return b.trim() !== ''; });
       log('Parsed ' + blocks.length + ' subtitle blocks.', 'success');
 
-      let processedCount = 0; // Tracks how many blocks we have successfully translated so far
+      let processedCount = 0;
 
       for (let s = 0; s < strategies.length; s++) {
-        if (processedCount >= blocks.length) break; // All blocks translated!
+        if (processedCount >= blocks.length) break;
 
         let strat = strategies[s];
         let stratName = strategyNames[s];
@@ -355,14 +362,12 @@ const HTML_CONTENT = `<!DOCTYPE html>
                 }
               }
 
-              // If AI missed ANY blocks, reject this chunk and switch strategy for the REST
               if (missingCount > 0) {
-                log('Incomplete: ' + missingCount + ' blocks missing. Keeping previous ' + processedCount + ' blocks. Switching strategy for the rest...', 'warn');
+                log('Incomplete: ' + missingCount + ' blocks missing. Keeping previous ' + processedCount + ' blocks. Switching strategy...', 'warn');
                 strategyFailed = true;
                 break; 
               }
 
-              // 100% success for this chunk, build the SRT text
               for (let j = 0; j < parsedBlocks.length; j++) {
                 const originalId = String(parsedBlocks[j].id).trim();
                 chunkSrt += parsedBlocks[j].id + '\n' + parsedBlocks[j].timestamp + '\n' + translationMap[originalId] + '\n\n';
@@ -371,9 +376,8 @@ const HTML_CONTENT = `<!DOCTYPE html>
               chunkSrt = cleanText + '\n\n';
             }
 
-            // Append to total and update progress
             translatedSrt += chunkSrt;
-            processedCount += parsedBlocks.length > 0 ? parsedBlocks.length : rawBlocks.length; // Fallback for Method 1
+            processedCount += parsedBlocks.length > 0 ? parsedBlocks.length : rawChunks[i].trim().split(/\n\s*\n/).length;
             
             outputArea.textContent = translatedSrt;
             outputArea.scrollTop = outputArea.scrollHeight;
@@ -413,14 +417,13 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
       copyBtn.disabled = false;
       log('File downloaded! You can also use the "Copy" button.', 'success');
-      translateBtn.textContent = 'Start Translation';
 
     } catch (err) {
       log('FATAL ERROR: ' + err.message, 'error');
-      translateBtn.textContent = 'Retry Translation';
     } finally {
-      // FIX: Ensure button is re-enabled if a file is still selected
+      // FIX: Guarantee button state and text are reset
       translateBtn.disabled = srtFileInput.files.length === 0;
+      translateBtn.textContent = 'Start Translation';
     }
   });
 </script>
