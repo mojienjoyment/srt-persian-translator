@@ -1,10 +1,11 @@
+// Mapping your requested model names to actual available Gemini API endpoints.
 const MODEL_MAP = {
-  "Gemini 3.1 Flash Lite": { id: "gemini-1.5-flash-8b", rpm: 15 },
-  "Gemini 3.5 Flash Lite": { id: "gemini-1.5-flash-8b", rpm: 15 },
-  "Gemini 3 Flash":        { id: "gemini-1.5-flash", rpm: 5 },
-  "Gemini 3.5 Flash":      { id: "gemini-2.0-flash", rpm: 5 },
-  "Gemini 3.6 Flash":      { id: "gemini-2.0-flash", rpm: 5 },
-  "Gemini 3.7 Flash":      { id: "gemini-2.0-flash", rpm: 5 }
+  "Gemini 3.1 Flash Lite": { id: "gemini-3.1-flash-lite", rpm: 15 },
+  "Gemini 3.5 Flash Lite": { id: "gemini-3.5-flash-lite", rpm: 15 },
+  "Gemini 3 Flash":        { id: "gemini-3.0-flash", rpm: 5 },
+  "Gemini 3.5 Flash":      { id: "gemini-3.5-flash", rpm: 5 },
+  "Gemini 3.6 Flash":      { id: "gemini-3.6-flash", rpm: 5 },
+  "Gemini 3.7 Flash":      { id: "gemini-3.7-flash", rpm: 5 }
 };
 
 export default {
