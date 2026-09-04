@@ -28,33 +28,28 @@ export default {
         let finalPrompt = '';
         
         if (useMethod2) {
-          finalPrompt = 'You are a professional subtitle translator. Translate the "text" field of each object in the following JSON array to informal, conversational Persian.\n' +
-            'STRICT RULES:\n' +
+          finalPrompt = 'Translate the "text" field of each object in the JSON array to informal Persian.\n' +
+            'RULES:\n' +
             '1. Return ONLY a valid JSON array of objects.\n' +
-            '2. Each object MUST have the exact same "id" as the input, and the translated string in the "text" field.\n' +
-            '3. Do NOT merge, split, or skip any objects. You MUST translate every single item.\n' +
-            '4. Use informal, colloquial Persian (spoken style/tehrani accent). DO NOT use formal Persian.\n' +
-            '5. Do NOT output any markdown, explanations, or conversational text. Just the JSON array.\n\n' +
+            '2. Keep the exact same "id" for each object.\n' +
+            '3. Translate EVERY single item. Do not skip or stop early.\n' +
+            '4. Use informal, colloquial Persian (spoken style). DO NOT use formal Persian.\n' +
+            '5. No markdown, no explanations. Just the JSON array.\n\n' +
             'Input:\n' + text;
             
           if (customPrompt && customPrompt.trim() !== '') {
-            finalPrompt = customPrompt + '\n\nCRITICAL: Return ONLY a valid JSON array of objects with the exact same "id"s and translated "text". Do not skip any.\n\nInput:\n' + text;
+            finalPrompt = customPrompt + '\n\nCRITICAL: Return ONLY a valid JSON array. Do not skip any.\n\nInput:\n' + text;
           }
         } else {
           if (customPrompt && customPrompt.trim() !== '') {
             finalPrompt = customPrompt + '\n\nText to translate:\n' + text;
           } else {
             finalPrompt = 'Translate the following English SRT subtitle text to Persian.\n' +
-              'STRICT FORMATTING RULES (CRITICAL):\n' +
-              '1. DO NOT change, alter, or renumber the sequence numbers. Keep them EXACTLY as they are.\n' +
-              '2. DO NOT change, modify, or recalculate the timestamps. Keep them EXACTLY as they are.\n' +
-              '3. Translate ONLY the text lines.\n' +
-              '4. Use informal, colloquial, and conversational Persian (spoken style). DO NOT use formal Persian.\n' +
-              '5. Do not output any markdown, explanations, or conversational text. Output ONLY the translated SRT.\n\n' +
-              'Example of correct output format:\n' +
-              '352\n' +
-              '00:20:15,532 --> 00:20:17,534\n' +
-              '[Translated Persian text here]\n\n' +
+              'STRICT FORMATTING RULES:\n' +
+              '1. DO NOT change sequence numbers or timestamps.\n' +
+              '2. Translate ONLY the text lines.\n' +
+              '3. Use informal, colloquial Persian (spoken style). DO NOT use formal Persian.\n' +
+              '4. No markdown or explanations. Output ONLY the translated SRT.\n\n' +
               'Text to translate:\n' + text;
           }
         }
@@ -64,10 +59,7 @@ export default {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: finalPrompt }] }],
-            generationConfig: { 
-              temperature: 0.1,
-              maxOutputTokens: 8192 
-            }
+            generationConfig: { temperature: 0.1, maxOutputTokens: 8192 }
           })
         });
 
@@ -78,7 +70,6 @@ export default {
 
         const data = await response.json();
         const translatedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        
         if (!translatedText) throw new Error("Empty response from Gemini.");
 
         let cleanText = translatedText.replace(/^```json\n?|```$/g, '').replace(/^```\n?|```$/g, '').trim();
@@ -89,16 +80,11 @@ export default {
 
       } catch (err) {
         console.error("Worker Error:", err);
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' }
-        });
+        return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
       }
     }
 
-    return new Response(HTML_CONTENT, {
-      headers: { 'Content-Type': 'text/html; charset=utf-8' },
-    });
+    return new Response(HTML_CONTENT, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
   }
 };
 
@@ -180,7 +166,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
     <button id="copyBtn" class="btn-small" disabled>Copy to Clipboard</button>
   </h3>
   <div id="output-area"><span class="placeholder">Translated subtitles will appear here in real-time...</span></div>
-  <p style="font-size: 12px; color: #7f8c8d; margin-top: 5px;">* The file will automatically download when finished. Use 'Copy' as a fallback.</p>
 </div>
 
 <script>
@@ -207,8 +192,11 @@ const HTML_CONTENT = `<!DOCTYPE html>
     "Gemini 3 Flash": 5, "Gemini 3.5 Flash": 5, "Gemini 3.6 Flash": 5, "Gemini 3.7 Flash": 5
   };
 
-  function checkReady() { translateBtn.disabled = !(srtFileInput.files.length > 0); }
-  srtFileInput.addEventListener('change', checkReady);
+  // FIX: Simplified and robust button state management
+  function updateButtonState() {
+    translateBtn.disabled = srtFileInput.files.length === 0;
+  }
+  srtFileInput.addEventListener('change', updateButtonState);
 
   copyBtn.addEventListener('click', function() {
     if (outputArea.textContent && !outputArea.querySelector('.placeholder')) {
@@ -234,11 +222,10 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
   async function fetchWithRetry(url, options, retries = 2, delay = 2000) {
     for (let i = 0; i < retries; i++) {
-      try {
-        return await fetch(url, options);
-      } catch (err) {
+      try { return await fetch(url, options); } 
+      catch (err) {
         if (i === retries - 1) throw err;
-        log('Network error. Retrying in ' + (delay/1000) + 's...', 'warn');
+        log('Network error. Retrying...', 'warn');
         await sleep(delay);
       }
     }
@@ -246,18 +233,11 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
   function parseAIResponse(str) {
     str = str.replace(/^\`\`\`json\s*/i, '').replace(/^\`\`\`\s*/i, '').trim();
-    try {
-      const parsed = JSON.parse(str);
-      if (Array.isArray(parsed)) return parsed;
-    } catch (e) {}
-
+    try { const parsed = JSON.parse(str); if (Array.isArray(parsed)) return parsed; } catch (e) {}
     const regex = /\{\s*"id"\s*:\s*"[^"]*"\s*,\s*"text"\s*:\s*"(?:\\\\.|[^"\\\\])*"\s*\}/g;
     const matches = str.match(regex);
-    
     if (matches && matches.length > 0) {
-      try {
-        return JSON.parse('[' + matches.join(',') + ']');
-      } catch (e) {}
+      try { return JSON.parse('[' + matches.join(',') + ']'); } catch (e) {}
     }
     return null;
   }
@@ -304,22 +284,24 @@ const HTML_CONTENT = `<!DOCTYPE html>
     try {
       log('Reading file: ' + file.name);
       let srtText = await file.text();
-      
       srtText = srtText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
       srtText = srtText.replace(/^\uFEFF/, ''); 
       
       const blocks = srtText.trim().split(/\n\s*\n/).filter(function(b) { return b.trim() !== ''; });
       log('Parsed ' + blocks.length + ' subtitle blocks.', 'success');
 
-      let success = false;
-      
+      let processedCount = 0; // Tracks how many blocks we have successfully translated so far
+
       for (let s = 0; s < strategies.length; s++) {
+        if (processedCount >= blocks.length) break; // All blocks translated!
+
         let strat = strategies[s];
         let stratName = strategyNames[s];
-        log('--- Attempting Strategy: ' + stratName + ' ---', 'info');
+        let remainingBlocks = blocks.slice(processedCount);
         
-        let rawChunks = getChunks(blocks, strat);
-        translatedSrt = ''; 
+        log('--- Strategy: ' + stratName + ' (Processing remaining ' + remainingBlocks.length + ' blocks) ---', 'info');
+        
+        let rawChunks = getChunks(remainingBlocks, strat);
         let strategyFailed = false;
 
         for (let i = 0; i < rawChunks.length; i++) {
@@ -347,22 +329,16 @@ const HTML_CONTENT = `<!DOCTYPE html>
               body: JSON.stringify(bodyData)
             });
 
-            if (!res.ok) {
-              const errText = await res.text();
-              throw new Error("HTTP " + res.status + ": " + errText.substring(0, 150));
-            }
-
+            if (!res.ok) throw new Error("HTTP " + res.status);
             const data = await res.json();
             if (data.error) throw new Error(data.error);
 
             const cleanText = data.text;
+            let chunkSrt = '';
 
             if (useMethod2) {
               const segments = parseAIResponse(cleanText);
-              
-              if (!segments) {
-                throw new Error("AI response could not be parsed or repaired.");
-              }
+              if (!segments) throw new Error("Invalid JSON response.");
 
               const translationMap = {};
               segments.forEach(function(item) {
@@ -379,51 +355,54 @@ const HTML_CONTENT = `<!DOCTYPE html>
                 }
               }
 
-              // FIX: If the AI missed ANY blocks, reject this chunk and force smaller chunks
+              // If AI missed ANY blocks, reject this chunk and switch strategy for the REST
               if (missingCount > 0) {
-                log('Incomplete translation: ' + missingCount + ' blocks missing. Chunk too large, trying smaller chunks...', 'warn');
+                log('Incomplete: ' + missingCount + ' blocks missing. Keeping previous ' + processedCount + ' blocks. Switching strategy for the rest...', 'warn');
                 strategyFailed = true;
-                break; // Break inner loop to trigger next strategy
+                break; 
               }
 
-              // If we reach here, 100% of blocks were translated. Build the SRT.
+              // 100% success for this chunk, build the SRT text
               for (let j = 0; j < parsedBlocks.length; j++) {
                 const originalId = String(parsedBlocks[j].id).trim();
-                const transText = translationMap[originalId];
-                translatedSrt += parsedBlocks[j].id + '\n' + parsedBlocks[j].timestamp + '\n' + transText + '\n\n';
+                chunkSrt += parsedBlocks[j].id + '\n' + parsedBlocks[j].timestamp + '\n' + translationMap[originalId] + '\n\n';
               }
             } else {
-              translatedSrt += cleanText + '\n\n';
+              chunkSrt = cleanText + '\n\n';
             }
 
+            // Append to total and update progress
+            translatedSrt += chunkSrt;
+            processedCount += parsedBlocks.length > 0 ? parsedBlocks.length : rawBlocks.length; // Fallback for Method 1
+            
             outputArea.textContent = translatedSrt;
             outputArea.scrollTop = outputArea.scrollHeight;
 
-            const percent = ((i + 1) / rawChunks.length) * 100;
-            progressFill.style.width = percent + '%';
-            log('Chunk ' + (i + 1) + ' translated! (' + Math.round(percent) + '%)', 'success');
+            const overallPercent = (processedCount / blocks.length) * 100;
+            progressFill.style.width = overallPercent + '%';
+            log('Chunk ' + (i + 1) + ' done! Overall progress: ' + Math.round(overallPercent) + '%', 'success');
 
             if (i < rawChunks.length - 1) {
               log('Pausing for ' + delayMs + 'ms...', 'warn');
               await sleep(delayMs);
             }
           } catch (chunkErr) {
-            log('Chunk failed: ' + chunkErr.message + '. Switching strategy...', 'error');
+            log('Chunk failed: ' + chunkErr.message + '. Keeping ' + processedCount + ' blocks. Switching strategy...', 'error');
             strategyFailed = true;
             break; 
           }
         }
 
         if (!strategyFailed) {
-          success = true;
-          log('Strategy ' + stratName + ' succeeded with 100% translation!', 'success');
-          break; 
+          log('Strategy ' + stratName + ' completed successfully!', 'success');
         }
       }
 
-      if (!success) throw new Error('All chunking strategies failed.');
+      if (processedCount < blocks.length) {
+        throw new Error('Failed to translate all blocks. Translated ' + processedCount + ' / ' + blocks.length);
+      }
 
-      log('All chunks processed! Generating download file...', 'success');
+      log('All ' + blocks.length + ' blocks processed! Generating download file...', 'success');
       const blob = new Blob([translatedSrt], { type: 'text/plain;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -433,15 +412,15 @@ const HTML_CONTENT = `<!DOCTYPE html>
       URL.revokeObjectURL(url);
 
       copyBtn.disabled = false;
-      log('File downloaded! You can also use the "Copy" button above.', 'success');
+      log('File downloaded! You can also use the "Copy" button.', 'success');
       translateBtn.textContent = 'Start Translation';
 
     } catch (err) {
       log('FATAL ERROR: ' + err.message, 'error');
       translateBtn.textContent = 'Retry Translation';
     } finally {
-      translateBtn.disabled = false;
-      checkReady();
+      // FIX: Ensure button is re-enabled if a file is still selected
+      translateBtn.disabled = srtFileInput.files.length === 0;
     }
   });
 </script>
