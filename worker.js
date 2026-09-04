@@ -7,14 +7,6 @@ const MODEL_MAP = {
   "Gemini 3.6 Flash":      { id: "gemini-3.6-flash", rpm: 5 },
   "Gemini 3.7 Flash":      { id: "gemini-3.7-flash", rpm: 5 }
 };
-const MODEL_MAP = {
-  "Gemini 3.1 Flash Lite": { id: "gemini-1.5-flash-8b", rpm: 15 },
-  "Gemini 3.5 Flash Lite": { id: "gemini-1.5-flash-8b", rpm: 15 },
-  "Gemini 3 Flash":        { id: "gemini-1.5-flash", rpm: 5 },
-  "Gemini 3.5 Flash":      { id: "gemini-2.0-flash", rpm: 5 },
-  "Gemini 3.6 Flash":      { id: "gemini-2.0-flash", rpm: 5 },
-  "Gemini 3.7 Flash":      { id: "gemini-2.0-flash", rpm: 5 }
-};
 
 export default {
   async fetch(request, env, ctx) {
