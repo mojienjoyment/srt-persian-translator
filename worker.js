@@ -27,18 +27,18 @@ export default {
         let finalPrompt = '';
         
         if (useMethod2) {
-          // METHOD 2 PROMPT: AI only sees text and the separator
-          finalPrompt = 'Translate the following subtitle texts to informal, conversational Persian.\n' +
+          // METHOD 2 PROMPT: JSON Array approach (Much more reliable than text separators)
+          finalPrompt = 'You are a professional subtitle translator. Translate the following JSON array of English subtitle texts to informal, conversational Persian.\n' +
             'STRICT RULES:\n' +
-            '1. Translate ONLY the text.\n' +
-            '2. You MUST output the exact same number of text segments as provided.\n' +
-            '3. You MUST separate each translated segment EXACTLY with the separator: \n###SEP###\n' +
-            '4. Do NOT add any numbers, timestamps, markdown, or conversational text.\n' +
-            '5. Output format must be: [Translated Text 1]\n###SEP###\n[Translated Text 2]\n\n' +
-            'Texts to translate:\n' + text;
+            '1. Return ONLY a valid JSON array of strings.\n' +
+            '2. The output array MUST have the EXACT same number of elements as the input array.\n' +
+            '3. Translate each string individually. Keep internal newlines (\\n) intact if they exist in the original text.\n' +
+            '4. Use informal, colloquial Persian (spoken style/tehrani accent). DO NOT use formal Persian.\n' +
+            '5. Do NOT output any markdown, explanations, or conversational text. Just the JSON array.\n\n' +
+            'Input:\n' + text;
             
           if (customPrompt && customPrompt.trim() !== '') {
-            finalPrompt = customPrompt + '\n\nCRITICAL: Separate each translated block EXACTLY with: \n###SEP###\n\nTexts:\n' + text;
+            finalPrompt = customPrompt + '\n\nCRITICAL: Return ONLY a valid JSON array of strings with the EXACT same number of elements as the input.\n\nInput:\n' + text;
           }
         } else {
           // METHOD 1 PROMPT: AI sees full SRT format
@@ -79,8 +79,8 @@ export default {
         
         if (!translatedText) throw new Error("Empty response from Gemini.");
 
-        // Clean up any markdown code blocks the AI might add
-        const cleanText = translatedText.replace(/^```[a-z]*\n?|```$/g, '').trim();
+        // Clean up any markdown code blocks the AI might add (e.g., ```json ... ```)
+        let cleanText = translatedText.replace(/^```json\n?|```$/g, '').replace(/^```\n?|```$/g, '').trim();
 
         return new Response(JSON.stringify({ text: cleanText }), {
           headers: { 'Content-Type': 'application/json' }
@@ -162,8 +162,8 @@ const HTML_CONTENT = `<!DOCTYPE html>
   </div>
 
   <div class="checkbox-group">
-    <input type="checkbox" id="method2Check">
-    <label for="method2Check"><strong>Use Method 2</strong> (Safest: AI only sees text, timestamps are 100% preserved)</label>
+    <input type="checkbox" id="method2Check" checked>
+    <label for="method2Check"><strong>Use Method 2</strong> (Recommended: JSON array ensures 100% timestamp/ID safety)</label>
   </div>
 
   <div class="checkbox-group">
@@ -298,7 +298,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
     const strategyNames = ['Whole Text', '2 Parts', '4 Parts', '100 blocks/chunk', '50 blocks/chunk', '20 blocks/chunk', '10 blocks/chunk'];
 
     log('Initializing translation using ' + modelKey);
-    log('Method: ' + (useMethod2 ? 'Method 2 (Text-only, 100% timestamp safe)' : 'Method 1 (Full SRT format)'));
+    log('Method: ' + (useMethod2 ? 'Method 2 (JSON Array - 100% timestamp safe)' : 'Method 1 (Full SRT format)'));
     log('Calculated delay: ' + delayMs + 'ms between requests.', 'warn');
 
     try {
@@ -324,7 +324,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
           let payloadText = rawChunks[i];
           let parsedBlocks = [];
 
-          // METHOD 2 LOGIC: Strip IDs and timestamps, keep only text separated by ###SEP###
+          // METHOD 2 LOGIC: Extract text into a JSON array
           if (useMethod2) {
             const rawBlocks = rawChunks[i].trim().split(/\\n\\s*\\n/);
             parsedBlocks = rawBlocks.map(function(b) {
@@ -335,7 +335,8 @@ const HTML_CONTENT = `<!DOCTYPE html>
                 text: lines.slice(2).join('\\n')
               };
             });
-            payloadText = parsedBlocks.map(function(b) { return b.text; }).join('\\n###SEP###\\n');
+            // Send as JSON array string
+            payloadText = JSON.stringify(parsedBlocks.map(function(b) { return b.text; }));
           }
 
           const bodyData = { 
@@ -362,15 +363,25 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
             const cleanText = data.text;
 
-            // METHOD 2 LOGIC: Reconstruct SRT using original IDs and timestamps
+            // METHOD 2 LOGIC: Parse JSON array and reconstruct SRT
             if (useMethod2) {
-              const segments = cleanText.split('\\n###SEP###\\n');
+              let segments;
+              try {
+                segments = JSON.parse(cleanText);
+              } catch (parseErr) {
+                throw new Error("AI did not return valid JSON. Response: " + cleanText.substring(0, 100));
+              }
+
+              if (!Array.isArray(segments)) {
+                throw new Error("AI response is not a JSON array.");
+              }
+
               if (segments.length !== parsedBlocks.length) {
-                throw new Error("Separator mismatch. AI returned " + segments.length + " segments, expected " + parsedBlocks.length);
+                throw new Error("Array length mismatch. AI returned " + segments.length + " items, expected " + parsedBlocks.length);
               }
               
               for (let j = 0; j < parsedBlocks.length; j++) {
-                const transText = segments[j] ? segments[j].trim() : parsedBlocks[j].text;
+                const transText = segments[j] ? String(segments[j]).trim() : parsedBlocks[j].text;
                 translatedSrt += parsedBlocks[j].id + '\\n' + parsedBlocks[j].timestamp + '\\n' + transText + '\\n\\n';
               }
             } else {
