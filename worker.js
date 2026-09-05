@@ -8,7 +8,6 @@ const MODEL_MAP = {
   "Gemini 3.7 Flash":      { id: "gemini-3.7-flash", rpm: 5 }
 };
 
-
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -115,7 +114,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
   .checkbox-group { display: flex; align-items: center; margin-bottom: 10px; }
   .checkbox-group input { width: auto; margin-right: 10px; }
   .checkbox-group label { margin-bottom: 0; font-weight: normal; }
-  #custom-prompt-area { display: none; margin-bottom: 20px; }
+  #custom-prompt-area, #manual-chunk-area { display: none; margin-bottom: 20px; }
   #progress-bar { width: 100%; height: 14px; background: #eee; border-radius: 7px; margin: 15px 0; overflow: hidden; border: 1px solid #ddd; }
   #progress-fill { height: 100%; background: linear-gradient(90deg, #2ecc71, #27ae60); width: 0%; transition: width 0.4s ease; }
   #log-area { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 6px; font-family: 'Courier New', monospace; font-size: 13px; height: 160px; overflow-y: auto; white-space: pre-wrap; margin-bottom: 20px; border: 1px solid #333; }
@@ -144,6 +143,20 @@ const HTML_CONTENT = `<!DOCTYPE html>
   <div class="checkbox-group">
     <input type="checkbox" id="method2Check" checked>
     <label for="method2Check"><strong>Use Method 2</strong> (Recommended: Bulletproof ID mapping, 100% timestamp safe)</label>
+  </div>
+  <div class="checkbox-group">
+    <input type="checkbox" id="manualChunkCheck">
+    <label for="manualChunkCheck">Use Manual Chunk Count</label>
+  </div>
+  <div id="manual-chunk-area">
+    <label for="manualChunkCount">Number of Parts to Split Into:</label>
+    <select id="manualChunkCount">
+      <option value="1">1 Part (Whole Text)</option>
+      <option value="2">2 Parts</option>
+      <option value="4">4 Parts</option>
+      <option value="8">8 Parts</option>
+      <option value="16">16 Parts</option>
+    </select>
   </div>
   <div class="checkbox-group">
     <input type="checkbox" id="customPromptCheck">
@@ -177,12 +190,20 @@ const HTML_CONTENT = `<!DOCTYPE html>
   const outputArea = document.getElementById('output-area');
   const copyBtn = document.getElementById('copyBtn');
   const method2Check = document.getElementById('method2Check');
+  const manualChunkCheck = document.getElementById('manualChunkCheck');
+  const manualChunkArea = document.getElementById('manual-chunk-area');
+  const manualChunkCount = document.getElementById('manualChunkCount');
   const customPromptCheck = document.getElementById('customPromptCheck');
   const customPromptArea = document.getElementById('custom-prompt-area');
   const customPromptText = document.getElementById('customPromptText');
 
   const DEFAULT_PROMPT = 'Translate to informal, conversational Persian. Keep the exact meaning.';
   customPromptText.value = DEFAULT_PROMPT;
+  
+  manualChunkCheck.addEventListener('change', function() {
+    manualChunkArea.style.display = manualChunkCheck.checked ? 'block' : 'none';
+  });
+  
   customPromptCheck.addEventListener('change', function() {
     customPromptArea.style.display = customPromptCheck.checked ? 'block' : 'none';
   });
@@ -258,7 +279,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
     return null;
   }
 
-  // FIX: Ensure blocks are converted to strings before joining to prevent [object Object]
   function getChunks(blocks, strategy) {
     const stringBlocks = blocks.map(function(b) {
       if (typeof b === 'object' && b !== null) {
@@ -266,6 +286,16 @@ const HTML_CONTENT = `<!DOCTYPE html>
       }
       return b;
     });
+
+    if (strategy.startsWith('manual_')) {
+      const count = parseInt(strategy.split('_')[1], 10);
+      const size = Math.ceil(stringBlocks.length / count);
+      let res = [];
+      for (let i = 0; i < stringBlocks.length; i += size) {
+        res.push(stringBlocks.slice(i, i + size).join('\\n\\n'));
+      }
+      return res;
+    }
 
     if (strategy === 'full') return [stringBlocks.join('\\n\\n')];
     if (strategy === 'half') { let mid = Math.ceil(stringBlocks.length / 2); return [stringBlocks.slice(0, mid).join('\\n\\n'), stringBlocks.slice(mid).join('\\n\\n')]; }
@@ -303,8 +333,15 @@ const HTML_CONTENT = `<!DOCTYPE html>
     let remainingBlocks = [];
     const MAX_RETRIES = 3;
 
-    const strategies = ['full', 'half', 'quarter', '100', '50', '20', '10'];
-    const strategyNames = ['Whole Text', '2 Parts', '4 Parts', '100 blocks/chunk', '50 blocks/chunk', '20 blocks/chunk', '10 blocks/chunk'];
+    // Build strategies based on manual chunk checkbox
+    let strategies = ['full', 'half', 'quarter', '100', '50', '20', '10'];
+    let strategyNames = ['Whole Text', '2 Parts', '4 Parts', '100 blocks/chunk', '50 blocks/chunk', '20 blocks/chunk', '10 blocks/chunk'];
+
+    if (manualChunkCheck.checked) {
+      const count = parseInt(manualChunkCount.value, 10);
+      strategies.unshift('manual_' + count);
+      strategyNames.unshift('Manual: ' + count + ' Parts');
+    }
 
     log('Initializing translation using ' + modelKey);
     log('Method: ' + (useMethod2 ? 'Method 2 (Bulletproof ID Mapping)' : 'Method 1 (Full SRT format)'));
@@ -430,7 +467,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
           if (strat === '10' && retries >= MAX_RETRIES) {
             log('Warning: ' + remainingBlocks.length + ' blocks still untranslated after all retries. Keeping original English.', 'warn');
-            // FIX: Safely handle objects in the final fallback
             for (let b of remainingBlocks) {
               if (typeof b === 'object' && b !== null) {
                 translatedSrt += b.id + '\\n' + b.timestamp + '\\n' + b.text + '\\n\\n';
